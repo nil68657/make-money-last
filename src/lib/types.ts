@@ -8,15 +8,17 @@
  *
  * Three separate multipliers, deliberately never merged (see `lib/fx.ts`):
  *
- *   FX         unit conversion only. Used once, to bring the savings you
- *              already hold in your current city's currency into the display
- *              currency.
+ *   FX         unit conversion only. Applied to the savings you already hold,
+ *              and to any budget row the user has denominated in a currency
+ *              other than the display one. Never to a price level.
  *   colIndex   city basket cost vs the US average. Re-prices the budget, and
  *              because it is a real-terms index it yields expenses already in
  *              the same unit as the income it was derived from.
  *   ppp        country price level vs the US. Used only for the international
  *              -dollars lens, never for the budget.
  */
+
+import type { FxSnapshot } from "./fx";
 
 export interface ExpenseBreakdown {
   medical: number;
@@ -25,6 +27,11 @@ export interface ExpenseBreakdown {
   rent: number;
   utilities: number;
   other: number;
+  /** Committed savings and investments: pension, SIP, anything locked away. */
+  savings: number;
+  /** Discretionary spending the household treats as a standing commitment. */
+  discretionary: number;
+  misc: number;
 }
 
 export type ExpenseCategory = keyof ExpenseBreakdown;
@@ -36,7 +43,42 @@ export const EXPENSE_CATEGORIES: ExpenseCategory[] = [
   "school",
   "utilities",
   "other",
+  "savings",
+  "discretionary",
+  "misc",
 ];
+
+/**
+ * One row of the budget.
+ *
+ * Rows exist because a relocated household's costs are not all in one
+ * currency. Someone moving Bangalore → Seattle keeps paying a home-loan EMI
+ * and school fees in INR while paying rent and groceries in USD, and a model
+ * that forces every line into the destination currency cannot express that.
+ *
+ * So each row carries its own `currency`, and two things follow from it:
+ *
+ *   - the amount is converted into the display currency at the market rate
+ *     before it reaches the projection, and
+ *   - the row inflates at *its own economy's* rate. INR school fees inflate at
+ *     Indian rates even while being displayed in dollars, because the fee is
+ *     set in rupees by an Indian school.
+ */
+export interface ExpenseLineItem {
+  /** Stable key. Built-ins use their category name; custom rows get a uid. */
+  id: string;
+  /** Bucket this rolls up into for the category chart and comparison. */
+  category: ExpenseCategory;
+  label: string;
+  /** The amount exactly as the user typed it, denominated in `currency`. */
+  amount: number;
+  /** ISO 4217 code the amount is entered in. */
+  currency: string;
+  /** True once hand-edited, so the cost model stops re-deriving the amount. */
+  overridden: boolean;
+  /** A row the user added. Never auto-derived, and removable. */
+  custom: boolean;
+}
 
 /**
  * A city in the reference dataset.
@@ -82,12 +124,12 @@ export interface LocationProfile {
   colIndex: number;
   /** Gross annual household income assumed for this location. */
   annualIncome: number;
-  expenses: ExpenseBreakdown;
   /**
-   * Categories the user has hand-edited. Untouched categories keep tracking the
-   * auto-derived cost model when income or city changes.
+   * The budget, one row at a time, each in its own currency. This is the
+   * source of truth; `ExpenseBreakdown` is only ever a rollup of it, resolved
+   * into the display currency.
    */
-  overriddenCategories: ExpenseCategory[];
+  lineItems: ExpenseLineItem[];
   /** Extra monthly savings inflow: employer match, RSU vesting, side income. */
   monthlySavingsContribution: number;
   /** Annual inflation rate, percent. */
@@ -131,6 +173,19 @@ export interface Assumptions {
    * education have historically outpaced headline CPI; rent tracks it closely.
    */
   categoryInflation: Record<ExpenseCategory, number>;
+  /**
+   * Annual drift of foreign currencies against the display currency, percent.
+   * Positive means foreign-denominated costs get *more* expensive in display
+   * terms over time.
+   *
+   * A cross-currency obligation is not a fixed cost. An INR school fee looks
+   * flat in rupees and moves every year in dollars, and pretending otherwise
+   * is the quiet way this kind of model misleads. Defaults to 0 — today's rate
+   * held forever — because a forecast nobody asked for is worse than an
+   * assumption stated plainly, but the dial is there and the UI names the
+   * inflation-differential figure that relative PPP would imply.
+   */
+  fxDriftPercent: number;
 }
 
 /** How the starting balance was brought into the display currency. */
@@ -158,6 +213,12 @@ export interface SimulationInputs {
   locationA: LocationProfile;
   locationB: LocationProfile;
   assumptions: Assumptions;
+  /**
+   * Rates in force for this run. Part of the inputs rather than read from a
+   * hook, so a projection is a pure function of what you can see on screen —
+   * and so the same inputs always reproduce the same numbers.
+   */
+  fx: FxSnapshot;
 }
 
 export interface MonthlySnapshot {
@@ -240,6 +301,7 @@ export const DEFAULT_ASSUMPTIONS: Assumptions = {
   incomeGrowth: 2.5,
   effectiveTaxRate: 25,
   adjustSalaryToLocalMarket: false,
+  fxDriftPercent: 0,
   categoryInflation: {
     rent: 1,
     food: 1.1,
@@ -247,16 +309,24 @@ export const DEFAULT_ASSUMPTIONS: Assumptions = {
     school: 1.4,
     utilities: 1.2,
     other: 1,
+    // A savings commitment is a number you choose, not a price you are quoted,
+    // so it does not track CPI unless the user says so.
+    savings: 0,
+    discretionary: 1,
+    misc: 1,
   },
 };
 
 export const EXPENSE_LABELS: Record<ExpenseCategory, string> = {
-  rent: "Rent / mortgage",
+  rent: "Rent / mortgage / EMI",
   food: "Food & groceries",
   medical: "Medical & insurance",
   school: "School & childcare",
   utilities: "Utilities & internet",
-  other: "Transport & everything else",
+  other: "Transport & insurance",
+  savings: "Savings & investments",
+  discretionary: "Extra funds & discretionary",
+  misc: "Miscellaneous",
 };
 
 /**
@@ -271,13 +341,21 @@ export const EXPENSE_SHORT_LABELS: Record<ExpenseCategory, string> = {
   school: "School",
   utilities: "Utilities",
   other: "Transport",
+  savings: "Savings",
+  discretionary: "Discretionary",
+  misc: "Misc",
 };
 
 export const EXPENSE_HINTS: Record<ExpenseCategory, string> = {
-  rent: "Monthly rent, or mortgage EMI plus property tax and HOA.",
+  rent: "Monthly rent, or mortgage EMI plus property tax and HOA. Keep it in the currency the loan is denominated in.",
   food: "Groceries plus eating out.",
   medical: "Premiums, out-of-pocket visits, prescriptions.",
   school: "Tuition, daycare, after-school and supplies.",
   utilities: "Power, water, gas, mobile and broadband.",
-  other: "Transport, insurance, travel, subscriptions, shopping.",
+  other: "Transport, vehicle and personal insurance, travel.",
+  savings:
+    "Money committed somewhere you will not draw on: pension, SIP, a locked deposit. It leaves your liquid runway, which is why it counts as an outflow here rather than as a balance.",
+  discretionary:
+    "Standing discretionary spend: subscriptions, hobbies, gifts, the fund you top up for anything that comes along.",
+  misc: "Whatever the other lines do not cover.",
 };

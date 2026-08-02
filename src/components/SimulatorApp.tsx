@@ -19,6 +19,7 @@ import {
 import {
   buildLocationProfile,
   incomeForDestination,
+  retargetLineItemCurrency,
   retargetLocationProfile,
 } from "@/lib/cost-model";
 import { formatDateInput, runComparison } from "@/lib/simulation";
@@ -34,7 +35,7 @@ import {
   Assumptions,
   CityRecord,
   DEFAULT_ASSUMPTIONS,
-  ExpenseCategory,
+  ExpenseLineItem,
   LocationProfile,
   SimulationInputs,
 } from "@/lib/types";
@@ -102,16 +103,19 @@ function buildInputs(
   assumptions: Assumptions,
   fx: FxSnapshot
 ): SimulationInputs {
+  const displayCurrency = cityB.currency;
   return {
     asOfDate: formatDateInput(new Date()),
-    displayCurrency: cityB.currency,
+    displayCurrency,
+    fx,
     ...convertSavings(savings, cityA, cityB, fx),
     projectionMonths: DEFAULT_HORIZON_MONTHS,
     locationA: buildLocationProfile(
       cityA,
-      incomeForOrigin(income, cityA, cityB, assumptions)
+      incomeForOrigin(income, cityA, cityB, assumptions),
+      displayCurrency
     ),
-    locationB: buildLocationProfile(cityB, income),
+    locationB: buildLocationProfile(cityB, income, displayCurrency),
     assumptions,
   };
 }
@@ -226,19 +230,23 @@ export function SimulatorApp() {
         );
       }
 
+      const displayCurrency = cityB.currency;
       return {
         ...existing,
-        displayCurrency: cityB.currency,
+        displayCurrency,
+        fx: rates,
         ...convertSavings(values.savings, cityA, cityB, rates),
         locationA: retargetLocationProfile(
           existing.locationA,
           cityA,
-          incomeForOrigin(values.income, cityA, cityB, assumptions)
+          incomeForOrigin(values.income, cityA, cityB, assumptions),
+          { displayCurrency }
         ),
         locationB: retargetLocationProfile(
           existing.locationB,
           cityB,
-          values.income
+          values.income,
+          { displayCurrency }
         ),
       };
     },
@@ -272,25 +280,87 @@ export function SimulatorApp() {
     []
   );
 
-  const patchExpense = useCallback(
-    (side: Side, category: ExpenseCategory, value: number) => {
+  /** Rewrites one side's rows through `update`, leaving everything else alone. */
+  const patchLineItems = useCallback(
+    (side: Side, update: (items: ExpenseLineItem[]) => ExpenseLineItem[]) => {
       setInputs((prev) => {
         if (!prev) return prev;
         const key = side === "A" ? "locationA" : "locationB";
         const profile = prev[key];
         return {
           ...prev,
-          [key]: {
-            ...profile,
-            expenses: { ...profile.expenses, [category]: value },
-            overriddenCategories: profile.overriddenCategories.includes(category)
-              ? profile.overriddenCategories
-              : [...profile.overriddenCategories, category],
-          },
+          [key]: { ...profile, lineItems: update(profile.lineItems) },
         };
       });
     },
     []
+  );
+
+  const patchLineItem = useCallback(
+    (side: Side, id: string, partial: Partial<ExpenseLineItem>) => {
+      patchLineItems(side, (items) =>
+        items.map((item) =>
+          item.id === id ? { ...item, ...partial, overridden: true } : item
+        )
+      );
+    },
+    [patchLineItems]
+  );
+
+  const changeLineItemCurrency = useCallback(
+    (side: Side, id: string, currency: string) => {
+      patchLineItems(side, (items) =>
+        items.map((item) =>
+          item.id === id ? retargetLineItemCurrency(item, currency, fx) : item
+        )
+      );
+    },
+    [patchLineItems, fx]
+  );
+
+  const addLineItem = useCallback(
+    (side: Side) => {
+      setInputs((prev) => {
+        if (!prev) return prev;
+        const key = side === "A" ? "locationA" : "locationB";
+        const profile = prev[key];
+        const item: ExpenseLineItem = {
+          id: `custom-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          category: "misc",
+          label: "",
+          amount: 0,
+          currency: prev.displayCurrency,
+          overridden: true,
+          custom: true,
+        };
+        return {
+          ...prev,
+          [key]: { ...profile, lineItems: [...profile.lineItems, item] },
+        };
+      });
+    },
+    []
+  );
+
+  const removeLineItem = useCallback(
+    (side: Side, id: string) => {
+      patchLineItems(side, (items) => items.filter((item) => item.id !== id));
+    },
+    [patchLineItems]
+  );
+
+  const moveLineItem = useCallback(
+    (side: Side, id: string, direction: -1 | 1) => {
+      patchLineItems(side, (items) => {
+        const from = items.findIndex((item) => item.id === id);
+        const to = from + direction;
+        if (from === -1 || to < 0 || to >= items.length) return items;
+        const next = [...items];
+        [next[from], next[to]] = [next[to], next[from]];
+        return next;
+      });
+    },
+    [patchLineItems]
   );
 
   const patchAssumptions = useCallback((partial: Partial<Assumptions>) => {
@@ -453,7 +523,11 @@ export function SimulatorApp() {
             onInputs={patchInputs}
             onAssumptions={patchAssumptions}
             onLocation={patchLocation}
-            onExpense={patchExpense}
+            onLineItem={patchLineItem}
+            onLineItemCurrency={changeLineItemCurrency}
+            onAddLineItem={addLineItem}
+            onRemoveLineItem={removeLineItem}
+            onMoveLineItem={moveLineItem}
             onReset={resetAssumptions}
           />
 

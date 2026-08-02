@@ -2,11 +2,11 @@
  * Throwaway sanity harness for the simulation model and the city search.
  * Run with: npx tsx scripts/verify-model.ts
  */
-import { CITIES, DATASET_CURRENCIES, DEFAULT_CITY_A_ID, DEFAULT_CITY_B_ID, cityCurrency, getCityById, searchCities } from "../src/lib/cities";
-import { buildLocationProfile, deriveExpenses, equivalentIncome, retargetLocationProfile } from "../src/lib/cost-model";
+import { CITIES, DATASET_CURRENCIES, DEFAULT_CITY_A_ID, DEFAULT_CITY_B_ID, cityCurrency, getCityById, inflationForCurrency, searchCities } from "../src/lib/cities";
+import { buildLocationProfile, deriveExpenses, equivalentIncome, hasForeignLineItems, mergeDerivedLineItems, resolveExpenses, retargetLineItemCurrency, retargetLocationProfile } from "../src/lib/cost-model";
 import { blendedReturn, GLOBAL_MARKET, MARKET_RETURNS, marketReturnFor, realReturn } from "../src/lib/market-data";
 import { runComparison, sumExpenses, formatDateInput } from "../src/lib/simulation";
-import { DEFAULT_ASSUMPTIONS, type SimulationInputs } from "../src/lib/types";
+import { DEFAULT_ASSUMPTIONS, EXPENSE_CATEGORIES, type ExpenseLineItem, type SimulationInputs } from "../src/lib/types";
 import { fold } from "../src/lib/text";
 import { cityLabel } from "../src/lib/cost-model";
 import { flagEmoji, formatCurrency, formatMonths, isZeroDecimalCurrency } from "../src/lib/format";
@@ -95,9 +95,10 @@ function makeInputs(savings: number, income: number, months = 360): SimulationIn
       ratesSource: "fallback",
     },
     projectionMonths: months,
-    locationA: buildLocationProfile(ny, income),
-    locationB: buildLocationProfile(lisbon, income),
+    locationA: buildLocationProfile(ny, income, lisbon.currency),
+    locationB: buildLocationProfile(lisbon, income, lisbon.currency),
     assumptions: DEFAULT_ASSUMPTIONS,
+    fx: FALLBACK_FX,
   };
 }
 
@@ -123,7 +124,11 @@ check("Lisbon has better cashflow", r.locationB.monthlyNet > r.locationA.monthly
 check("Lisbon cheaper", r.costOfLivingDeltaPercent < 0);
 check("real <= nominal at the end (inflation erodes)", r.locationB.finalPppSavings < r.locationB.finalSavings);
 check("month-0 real == nominal", Math.abs(r.locationB.trajectory[0].pppAdjustedSavings - 250_000) < 1);
-check("categories cover all six", r.categories.length === 6);
+check(
+  "categories cover every bucket",
+  r.categories.length === EXPENSE_CATEGORIES.length,
+  `${r.categories.length}`
+);
 check("runway delta favours Lisbon", (r.runwayDifferenceMonths ?? 0) > 0);
 
 // runway must be monotone in starting savings
@@ -238,13 +243,40 @@ check(
   `${convertForEntry(150_000, "USD", "JPY", FALLBACK_FX)}`
 );
 
-// FX and PPP must stay independent: converting the display currency must not
-// move a single real quantity. A model that folded the rate into the price
-// level would shift runway here.
+// FX and PPP must stay independent: restating the whole scenario in another
+// unit must not move a single real quantity. A model that folded the rate into
+// a price level would shift runway here.
+//
+// "Restating" has to be total — income, savings, contributions and every
+// budget row — because all of them are denominated in the display currency.
+// Changing the label alone would just be an inconsistent scenario, and would
+// test nothing.
+function restateIn(inputs: SimulationInputs, to: string): SimulationInputs {
+  const from = inputs.displayCurrency;
+  const conv = (value: number) => convertAmount(value, from, to, FALLBACK_FX);
+  const move = (profile: SimulationInputs["locationA"]) => ({
+    ...profile,
+    annualIncome: conv(profile.annualIncome),
+    monthlySavingsContribution: conv(profile.monthlySavingsContribution),
+    lineItems: profile.lineItems.map((item: ExpenseLineItem) => ({
+      ...item,
+      amount: conv(item.amount),
+      currency: to,
+    })),
+  });
+  return {
+    ...inputs,
+    displayCurrency: to,
+    currentSavings: conv(inputs.currentSavings),
+    locationA: move(inputs.locationA),
+    locationB: move(inputs.locationB),
+  };
+}
+
 // Savings chosen so both sides actually deplete, or the check is vacuous.
 const depletingInputs = makeInputs(60_000, 150_000);
 const inEuro = runComparison(depletingInputs);
-const inYen = runComparison({ ...depletingInputs, displayCurrency: "JPY" });
+const inYen = runComparison(restateIn(depletingInputs, "JPY"));
 check(
   "the depleting scenario really depletes",
   inEuro.locationA.runwayMonths !== null,
@@ -294,6 +326,154 @@ check(
     const out = formatCurrency(1234, code);
     return typeof out === "string" && out.length > 0 && !out.includes("NaN");
   })
+);
+
+// --------------------------------------------------------- expense line items
+const eurItems = buildLocationProfile(lisbon, 150_000, "EUR").lineItems;
+check(
+  "a fresh profile has one row per category, all in the display currency",
+  eurItems.length === EXPENSE_CATEGORIES.length &&
+    eurItems.every((i) => i.currency === "EUR" && !i.custom && !i.overridden),
+  `${eurItems.length} rows`
+);
+check(
+  "rolling rows up reproduces the plain cost model",
+  Math.abs(
+    sumExpenses(resolveExpenses(eurItems, "EUR", FALLBACK_FX)) -
+      sumExpenses(deriveExpenses(150_000, lisbon.colIndex))
+  ) < 1
+);
+check(
+  "a foreign row is converted into the display currency",
+  Math.abs(
+    resolveExpenses(
+      [{ ...eurItems[0], amount: 100_000, currency: "INR" }],
+      "EUR",
+      FALLBACK_FX
+    ).rent -
+      (100_000 * FALLBACK_RATES.EUR) / FALLBACK_RATES.INR
+  ) < 1e-6
+);
+check(
+  "custom rows roll up under the category they are grouped in",
+  resolveExpenses(
+    [
+      { id: "c1", category: "misc", label: "Storage unit", amount: 100, currency: "EUR", overridden: true, custom: true },
+      { id: "c2", category: "misc", label: "Alimony", amount: 250, currency: "EUR", overridden: true, custom: true },
+    ],
+    "EUR",
+    FALLBACK_FX
+  ).misc === 350
+);
+check(
+  "moving a row's currency carries the amount with it",
+  retargetLineItemCurrency({ ...eurItems[0], amount: 1000 }, "INR", FALLBACK_FX)
+    .amount > 80_000,
+  `${retargetLineItemCurrency({ ...eurItems[0], amount: 1000 }, "INR", FALLBACK_FX).amount} INR`
+);
+check(
+  "changing a row's currency marks it edited, so the model stops re-deriving it",
+  retargetLineItemCurrency(eurItems[0], "INR", FALLBACK_FX).overridden
+);
+check(
+  "an edited row survives re-derivation",
+  mergeDerivedLineItems(
+    [{ ...eurItems[0], amount: 4321, overridden: true }],
+    999_999,
+    lisbon.colIndex,
+    "EUR"
+  )[0].amount === 4321
+);
+check(
+  "an untouched row follows both the model and the display currency",
+  mergeDerivedLineItems(eurItems, 150_000, lisbon.colIndex, "JPY")[0].currency ===
+    "JPY"
+);
+check(
+  "foreign rows are detected",
+  hasForeignLineItems([{ ...eurItems[0], amount: 500, currency: "INR" }], "EUR") &&
+    !hasForeignLineItems(eurItems, "EUR")
+);
+
+// A rupee-denominated obligation must inflate at Indian rates, not Portuguese
+// ones, even though it is displayed in euros. This is the whole point of
+// per-row currencies, so it gets a direct check.
+check(
+  "currency inflation is looked up per economy",
+  inflationForCurrency("INR") > inflationForCurrency("EUR") &&
+    inflationForCurrency("JPY") < inflationForCurrency("INR"),
+  `INR ${inflationForCurrency("INR")}% vs EUR ${inflationForCurrency("EUR")}% vs JPY ${inflationForCurrency("JPY")}%`
+);
+check(
+  "an unknown currency still returns a usable rate",
+  inflationForCurrency("ZZZ") > 0
+);
+
+const withRupeeFees: SimulationInputs = (() => {
+  const b = makeInputs(250_000, 150_000);
+  const school = b.locationB.lineItems.find((i) => i.category === "school")!;
+  return {
+    ...b,
+    locationB: {
+      ...b.locationB,
+      lineItems: b.locationB.lineItems.map((i) =>
+        i.id === school.id
+          ? { ...i, amount: 100_000, currency: "INR", overridden: true }
+          : i
+      ),
+    },
+  };
+})();
+const rupeeRun = runComparison(withRupeeFees);
+const euroEquivalent = runComparison({
+  ...withRupeeFees,
+  locationB: {
+    ...withRupeeFees.locationB,
+    lineItems: withRupeeFees.locationB.lineItems.map((i) =>
+      i.currency === "INR"
+        ? {
+            ...i,
+            amount: convertAmount(i.amount, "INR", "EUR", FALLBACK_FX),
+            currency: "EUR",
+          }
+        : i
+    ),
+  },
+});
+check(
+  "a rupee row and its euro equivalent start from the same monthly figure",
+  Math.abs(rupeeRun.locationB.monthlyExpenses - euroEquivalent.locationB.monthlyExpenses) < 1,
+  `${rupeeRun.locationB.monthlyExpenses.toFixed(2)} vs ${euroEquivalent.locationB.monthlyExpenses.toFixed(2)}`
+);
+check(
+  "but they diverge later, because the rupee row inflates at Indian rates",
+  rupeeRun.locationB.trajectory[240].totalExpenses >
+    euroEquivalent.locationB.trajectory[240].totalExpenses * 1.02,
+  `after 20y: ${Math.round(rupeeRun.locationB.trajectory[240].totalExpenses)} vs ${Math.round(euroEquivalent.locationB.trajectory[240].totalExpenses)}`
+);
+
+// FX drift must touch foreign rows and nothing else.
+const drifted = runComparison({
+  ...withRupeeFees,
+  assumptions: { ...DEFAULT_ASSUMPTIONS, fxDriftPercent: 4 },
+});
+check(
+  "FX drift raises the cost of a foreign row over time",
+  drifted.locationB.trajectory[240].totalExpenses >
+    rupeeRun.locationB.trajectory[240].totalExpenses,
+  `${Math.round(drifted.locationB.trajectory[240].totalExpenses)} vs ${Math.round(rupeeRun.locationB.trajectory[240].totalExpenses)}`
+);
+check(
+  "FX drift leaves month 0 alone — it is a drift, not a repricing",
+  Math.abs(
+    drifted.locationB.trajectory[0].totalExpenses -
+      rupeeRun.locationB.trajectory[0].totalExpenses
+  ) < 1e-6
+);
+check(
+  "FX drift does nothing when every row is in the display currency",
+  runComparison({ ...base, assumptions: { ...DEFAULT_ASSUMPTIONS, fxDriftPercent: 8 } })
+    .locationB.finalSavings === runComparison(base).locationB.finalSavings
 );
 
 // -------------------------------------------------------------- market data
@@ -412,7 +592,10 @@ check(
 );
 
 // same city both sides -> identical results
-const same = runComparison({ ...base, locationB: buildLocationProfile(ny, 150_000) });
+const same = runComparison({
+  ...base,
+  locationB: buildLocationProfile(ny, 150_000, lisbon.currency),
+});
 check("identical cities -> identical runway", same.locationA.runwayMonths === same.locationB.runwayMonths);
 check("identical cities -> 0% COL delta", Math.abs(same.costOfLivingDeltaPercent) < 0.001);
 

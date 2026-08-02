@@ -410,6 +410,39 @@ export const DATASET_CURRENCIES: string[] = Array.from(
   new Set(CITIES.map((city) => city.currency))
 ).sort();
 
+/**
+ * Headline inflation of the economy that issues a currency.
+ *
+ * A budget line denominated in rupees is a price set in India, so it climbs at
+ * Indian inflation no matter which city the household lives in or which
+ * currency the projection is shown in. Inflation is a country-level figure in
+ * this dataset, so the first city using the code answers for the whole economy.
+ *
+ * The euro is the awkward case — one currency over twenty economies with
+ * genuinely different prints. The median of its members is used rather than
+ * whichever eurozone city happens to sort first, which would otherwise make
+ * the answer depend on the order of an unrelated list.
+ */
+const CURRENCY_INFLATION: Map<string, number> = (() => {
+  const byCurrency = new Map<string, number[]>();
+  for (const city of CITIES) {
+    const seen = byCurrency.get(city.currency) ?? [];
+    if (!seen.includes(city.inflation)) seen.push(city.inflation);
+    byCurrency.set(city.currency, seen);
+  }
+  const out = new Map<string, number>();
+  for (const [code, rates] of byCurrency) {
+    const sorted = [...rates].sort((a, b) => a - b);
+    out.set(code, sorted[Math.floor(sorted.length / 2)]);
+  }
+  return out;
+})();
+
+/** Falls back to a middling global figure for a code outside the dataset. */
+export function inflationForCurrency(currency: string): number {
+  return CURRENCY_INFLATION.get(currency?.toUpperCase()) ?? 3;
+}
+
 /** Lowercase, strip combining marks, collapse surrounding space. */
 function normalize(value: string): string {
   return value

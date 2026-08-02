@@ -3,9 +3,12 @@ import {
   CityRecord,
   ExpenseBreakdown,
   ExpenseCategory,
+  ExpenseLineItem,
+  EXPENSE_LABELS,
   LocationProfile,
 } from "./types";
 import { marketReturnFor } from "./market-data";
+import { convertAmount, convertForEntry, type FxSnapshot } from "./fx";
 
 /**
  * Cost model: turning "a city + a household income" into a monthly budget.
@@ -29,14 +32,26 @@ import { marketReturnFor } from "./market-data";
  * single category and the rest keep tracking the model.
  */
 
-/** Share of gross monthly income, at colIndex 100. Sums to ~0.565. */
+/**
+ * Share of gross monthly income, at colIndex 100. Sums to ~0.555.
+ *
+ * `discretionary` and `misc` were carved out of what `other` used to absorb
+ * rather than added on top, so splitting the old catch-all into three named
+ * lines does not silently make everyone's projection worse. `savings` starts
+ * at zero on purpose: a pension or SIP commitment is something the user has or
+ * has not got, and guessing one for them would shorten their runway on an
+ * assumption they never made.
+ */
 export const BASELINE_SHARES: Record<ExpenseCategory, number> = {
   rent: 0.22,
   food: 0.09,
   medical: 0.05,
   school: 0.03,
   utilities: 0.045,
-  other: 0.12,
+  other: 0.075,
+  savings: 0,
+  discretionary: 0.03,
+  misc: 0.015,
 };
 
 /** Sensitivity of each category to the local cost-of-living index. */
@@ -47,6 +62,10 @@ export const COL_ELASTICITY: Record<ExpenseCategory, number> = {
   school: 0.7,
   utilities: 0.35,
   other: 0.5,
+  // What you choose to save is not a local price, so it does not re-price.
+  savings: 0,
+  discretionary: 0.6,
+  misc: 0.5,
 };
 
 const CATEGORIES = Object.keys(BASELINE_SHARES) as ExpenseCategory[];
@@ -70,19 +89,116 @@ export function deriveExpenses(
   return out;
 }
 
+export function emptyBreakdown(): ExpenseBreakdown {
+  return {
+    rent: 0,
+    food: 0,
+    medical: 0,
+    school: 0,
+    utilities: 0,
+    other: 0,
+    savings: 0,
+    discretionary: 0,
+    misc: 0,
+  };
+}
+
 /**
- * Re-derive the budget while preserving any category the user hand-edited.
+ * The default budget as rows, one per built-in category, all denominated in
+ * the display currency.
+ *
+ * The display currency is right for the defaults on *both* sides: income is
+ * entered in the destination's currency and every derived figure descends from
+ * it, so a freshly derived budget is already in that unit. Rows only diverge
+ * from it once the user says a particular obligation is paid in something else.
  */
-export function mergeDerivedExpenses(
-  current: ExpenseBreakdown,
-  derived: ExpenseBreakdown,
-  overridden: ExpenseCategory[]
+export function deriveLineItems(
+  annualIncome: number,
+  colIndex: number,
+  displayCurrency: string
+): ExpenseLineItem[] {
+  const derived = deriveExpenses(annualIncome, colIndex);
+  return CATEGORIES.map((category) => ({
+    id: category,
+    category,
+    label: EXPENSE_LABELS[category],
+    amount: derived[category],
+    currency: displayCurrency,
+    overridden: false,
+    custom: false,
+  }));
+}
+
+/**
+ * Re-derive amounts for rows the user has not touched, leaving edited and
+ * custom rows exactly as they are.
+ *
+ * A row the user has moved to another currency counts as edited: re-deriving
+ * it would write a display-currency figure into a field labelled in rupees.
+ */
+export function mergeDerivedLineItems(
+  current: ExpenseLineItem[],
+  annualIncome: number,
+  colIndex: number,
+  displayCurrency: string
+): ExpenseLineItem[] {
+  const derived = deriveExpenses(annualIncome, colIndex);
+  return current.map((item) => {
+    if (item.custom || item.overridden) return item;
+    // An untouched row tracks both the model and the unit the answer is given
+    // in, so it follows the display currency when the destination changes.
+    return { ...item, amount: derived[item.category], currency: displayCurrency };
+  });
+}
+
+/** Roll rows up into the six-plus-three bucket view, in display currency. */
+export function resolveExpenses(
+  lineItems: ExpenseLineItem[],
+  displayCurrency: string,
+  fx: FxSnapshot
 ): ExpenseBreakdown {
-  const out = { ...derived };
-  for (const category of overridden) {
-    out[category] = current[category];
+  const out = emptyBreakdown();
+  for (const item of lineItems) {
+    out[item.category] += convertAmount(
+      item.amount,
+      item.currency,
+      displayCurrency,
+      fx
+    );
   }
   return out;
+}
+
+/** True when any row is denominated in something other than the display unit. */
+export function hasForeignLineItems(
+  lineItems: ExpenseLineItem[],
+  displayCurrency: string
+): boolean {
+  return lineItems.some(
+    (item) => item.amount > 0 && item.currency !== displayCurrency
+  );
+}
+
+/**
+ * Move a row to a different currency, carrying the amount with it.
+ *
+ * Leaving "45,000" in place while the label flips from $ to ₹ would silently
+ * turn a rent payment into a rounding error, so the figure is converted the
+ * same way the top-level money fields are — to three significant figures,
+ * because an exact conversion of a round number never reads as one.
+ */
+export function retargetLineItemCurrency(
+  item: ExpenseLineItem,
+  currency: string,
+  fx: FxSnapshot
+): ExpenseLineItem {
+  if (item.currency === currency) return item;
+  return {
+    ...item,
+    currency,
+    amount: convertForEntry(item.amount, item.currency, currency, fx),
+    overridden: true,
+  };
 }
 
 /**
@@ -114,10 +230,17 @@ export function equivalentIncome(
   return Math.round(annualIncome * ratio);
 }
 
-/** Build a fresh location profile for a city at a given income. */
+/**
+ * Build a fresh location profile for a city at a given income.
+ *
+ * `displayCurrency` defaults to the city's own, which is right when a profile
+ * is built in isolation; the app passes the destination's currency so both
+ * sides of a comparison start out in the unit the answer is given in.
+ */
 export function buildLocationProfile(
   city: CityRecord,
-  annualIncome: number
+  annualIncome: number,
+  displayCurrency: string = city.currency
 ): LocationProfile {
   const market = marketReturnFor(city.countryCode);
   return {
@@ -128,8 +251,7 @@ export function buildLocationProfile(
     currency: city.currency,
     colIndex: city.colIndex,
     annualIncome,
-    expenses: deriveExpenses(annualIncome, city.colIndex),
-    overriddenCategories: [],
+    lineItems: deriveLineItems(annualIncome, city.colIndex, displayCurrency),
     monthlySavingsContribution: 0,
     inflationRate: city.inflation,
     pppIndex: city.ppp,
@@ -149,11 +271,11 @@ export function retargetLocationProfile(
   profile: LocationProfile,
   city: CityRecord,
   annualIncome: number,
-  options: { resetInflationAndPpp?: boolean } = {}
+  options: { resetInflationAndPpp?: boolean; displayCurrency?: string } = {}
 ): LocationProfile {
   const cityChanged = profile.cityId !== city.id;
-  const derived = deriveExpenses(annualIncome, city.colIndex);
   const resetRates = options.resetInflationAndPpp ?? cityChanged;
+  const displayCurrency = options.displayCurrency ?? city.currency;
   // A market return the user typed is a view about their own portfolio, not
   // about the city, so it survives a change of destination. An untouched one
   // follows the country, since that is the whole point of the default.
@@ -169,10 +291,11 @@ export function retargetLocationProfile(
     currency: city.currency,
     colIndex: cityChanged ? city.colIndex : profile.colIndex,
     annualIncome,
-    expenses: mergeDerivedExpenses(
-      profile.expenses,
-      derived,
-      profile.overriddenCategories
+    lineItems: mergeDerivedLineItems(
+      profile.lineItems,
+      annualIncome,
+      city.colIndex,
+      displayCurrency
     ),
     inflationRate: resetRates ? city.inflation : profile.inflationRate,
     pppIndex: resetRates ? city.ppp : profile.pppIndex,

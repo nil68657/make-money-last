@@ -3,6 +3,7 @@
 import { useId } from "react";
 import { RotateCcw } from "lucide-react";
 import { Sheet } from "./ui/Sheet";
+import { ExpenseEditor } from "./ExpenseEditor";
 import { Button, Divider } from "./ui/primitives";
 import {
   FieldLabel,
@@ -11,17 +12,15 @@ import {
   RangeField,
   SwitchField,
 } from "./ui/Field";
-import { InfoTip } from "./ui/InfoTip";
-import { cn, flagEmoji, formatCurrency, formatPercent } from "@/lib/format";
+import { inflationForCurrency } from "@/lib/cities";
+import { cn, flagEmoji, formatPercent } from "@/lib/format";
 import { blendedReturn, realReturn } from "@/lib/market-data";
-import { sumExpenses } from "@/lib/simulation";
 import {
   Assumptions,
   EXPENSE_CATEGORIES,
-  EXPENSE_HINTS,
   EXPENSE_LABELS,
   EXPENSE_SHORT_LABELS,
-  ExpenseCategory,
+  ExpenseLineItem,
   LocationProfile,
   SimulationInputs,
 } from "@/lib/types";
@@ -39,7 +38,11 @@ export function AssumptionsDrawer({
   onInputs,
   onAssumptions,
   onLocation,
-  onExpense,
+  onLineItem,
+  onLineItemCurrency,
+  onAddLineItem,
+  onRemoveLineItem,
+  onMoveLineItem,
   onReset,
 }: {
   open: boolean;
@@ -48,12 +51,23 @@ export function AssumptionsDrawer({
   onInputs: (partial: Partial<SimulationInputs>) => void;
   onAssumptions: (partial: Partial<Assumptions>) => void;
   onLocation: (side: Side, partial: Partial<LocationProfile>) => void;
-  onExpense: (side: Side, category: ExpenseCategory, value: number) => void;
+  onLineItem: (side: Side, id: string, partial: Partial<ExpenseLineItem>) => void;
+  onLineItemCurrency: (side: Side, id: string, currency: string) => void;
+  onAddLineItem: (side: Side) => void;
+  onRemoveLineItem: (side: Side, id: string) => void;
+  onMoveLineItem: (side: Side, id: string, direction: -1 | 1) => void;
   onReset: () => void;
 }) {
   const { assumptions, locationA, locationB } = inputs;
   const currency = inputs.displayCurrency;
+  const homeCurrency = locationA.currency;
   const uid = useId();
+
+  // Relative PPP: the higher-inflation currency depreciates at roughly the
+  // inflation gap. Offered as a reference point for the drift dial, never
+  // applied on the user's behalf.
+  const pppImpliedDrift =
+    inflationForCurrency(homeCurrency) - inflationForCurrency(currency);
 
   return (
     <Sheet
@@ -120,6 +134,16 @@ export function AssumptionsDrawer({
               step={1}
               format={(value) => formatPercent(value, 0)}
             />
+            <RangeField
+              label="Foreign-currency drift"
+              hint={`Annual drift of foreign-denominated budget lines against ${currency}. A rupee EMI is flat in rupees and moves every year in ${currency}; this is where you say by how much. Relative PPP would put it near the inflation gap between the two economies — roughly ${formatPercent(pppImpliedDrift, 1)} here — but nobody knows, so it starts at zero and stays visible.`}
+              value={assumptions.fxDriftPercent}
+              onChange={(value) => onAssumptions({ fxDriftPercent: value })}
+              min={-10}
+              max={10}
+              step={0.5}
+              format={(value) => formatPercent(value, 1)}
+            />
             <Divider />
             <SwitchField
               label="Re-scale salary to local market"
@@ -167,23 +191,22 @@ export function AssumptionsDrawer({
           </div>
         </Section>
 
-        <CitySection
-          side="A"
-          profile={locationA}
-          currency={currency}
-          investedPercentage={assumptions.investedPercentage}
-          onLocation={onLocation}
-          onExpense={onExpense}
-        />
-
-        <CitySection
-          side="B"
-          profile={locationB}
-          currency={currency}
-          investedPercentage={assumptions.investedPercentage}
-          onLocation={onLocation}
-          onExpense={onExpense}
-        />
+        {(["A", "B"] as const).map((side) => (
+          <CitySection
+            key={side}
+            side={side}
+            profile={side === "A" ? locationA : locationB}
+            currency={currency}
+            homeCurrency={homeCurrency}
+            investedPercentage={assumptions.investedPercentage}
+            onLocation={onLocation}
+            onLineItem={onLineItem}
+            onLineItemCurrency={onLineItemCurrency}
+            onAddLineItem={onAddLineItem}
+            onRemoveLineItem={onRemoveLineItem}
+            onMoveLineItem={onMoveLineItem}
+          />
+        ))}
       </div>
     </Sheet>
   );
@@ -215,18 +238,27 @@ function CitySection({
   side,
   profile,
   currency,
+  homeCurrency,
   investedPercentage,
   onLocation,
-  onExpense,
+  onLineItem,
+  onLineItemCurrency,
+  onAddLineItem,
+  onRemoveLineItem,
+  onMoveLineItem,
 }: {
   side: Side;
   profile: LocationProfile;
   currency: string;
+  homeCurrency: string;
   investedPercentage: number;
   onLocation: (side: Side, partial: Partial<LocationProfile>) => void;
-  onExpense: (side: Side, category: ExpenseCategory, value: number) => void;
+  onLineItem: (side: Side, id: string, partial: Partial<ExpenseLineItem>) => void;
+  onLineItemCurrency: (side: Side, id: string, currency: string) => void;
+  onAddLineItem: (side: Side) => void;
+  onRemoveLineItem: (side: Side, id: string) => void;
+  onMoveLineItem: (side: Side, id: string, direction: -1 | 1) => void;
 }) {
-  const total = sumExpenses(profile.expenses);
   const uid = useId();
   const fieldId = (name: string) => `${uid}-${side}-${name}`;
 
@@ -362,44 +394,17 @@ function CitySection({
         />
       </div>
 
-      <p className="mb-3 mt-5 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-fg-subtle">
-        Monthly budget
-        <InfoTip
-          content="These start from the cost model — income share by category, re-priced by the local cost-of-living index. Edit any line and it stops auto-updating."
-          align="start"
-        />
-      </p>
-      <div className="grid gap-3 sm:grid-cols-2">
-        {EXPENSE_CATEGORIES.map((category) => (
-          <div key={category}>
-            <FieldLabel
-              htmlFor={fieldId(category)}
-              hint={EXPENSE_HINTS[category]}
-              hintAlign="start"
-            >
-              {EXPENSE_LABELS[category]}
-              {profile.overriddenCategories.includes(category) && (
-                <span className="ml-1.5 text-[10px] font-bold uppercase tracking-wide text-brand">
-                  edited
-                </span>
-              )}
-            </FieldLabel>
-            <MoneyInput
-              id={fieldId(category)}
-              value={profile.expenses[category]}
-              onChange={(value) => onExpense(side, category, value)}
-              currency={currency}
-            />
-          </div>
-        ))}
-      </div>
-
-      <p className="mt-4 text-xs text-fg-muted">
-        Total monthly spend:{" "}
-        <span className="tabular font-bold text-fg">
-          {formatCurrency(total, currency)}
-        </span>
-      </p>
+      <ExpenseEditor
+        items={profile.lineItems}
+        displayCurrency={currency}
+        homeCurrency={homeCurrency}
+        locationCurrency={profile.currency}
+        onChange={(id, partial) => onLineItem(side, id, partial)}
+        onCurrency={(id, code) => onLineItemCurrency(side, id, code)}
+        onAdd={() => onAddLineItem(side)}
+        onRemove={(id) => onRemoveLineItem(side, id)}
+        onMove={(id, direction) => onMoveLineItem(side, id, direction)}
+      />
     </section>
   );
 }

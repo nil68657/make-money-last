@@ -4,6 +4,7 @@ import {
   ComparisonResult,
   ExpenseBreakdown,
   ExpenseCategory,
+  ExpenseLineItem,
   EXPENSE_CATEGORIES,
   EXPENSE_LABELS,
   LocationProfile,
@@ -13,7 +14,14 @@ import {
 } from "./types";
 import { getEffectivePpp } from "./ppp-data";
 import { blendedReturn, realReturn } from "./market-data";
-import { equivalentIncome, monthlyTakeHome } from "./cost-model";
+import { inflationForCurrency } from "./cities";
+import { convertAmount } from "./fx";
+import {
+  emptyBreakdown,
+  equivalentIncome,
+  monthlyTakeHome,
+  resolveExpenses,
+} from "./cost-model";
 
 /**
  * The simulation model, month by month.
@@ -56,14 +64,9 @@ import { equivalentIncome, monthlyTakeHome } from "./cost-model";
  */
 
 export function sumExpenses(expenses: ExpenseBreakdown): number {
-  return (
-    expenses.medical +
-    expenses.school +
-    expenses.food +
-    expenses.rent +
-    expenses.utilities +
-    expenses.other
-  );
+  let total = 0;
+  for (const category of EXPENSE_CATEGORIES) total += expenses[category] ?? 0;
+  return total;
 }
 
 export function parseAsOfDate(dateStr: string): Date {
@@ -99,17 +102,79 @@ export function categoryInflationRate(
   return profile.inflationRate * assumptions.categoryInflation[category];
 }
 
-function inflateExpenses(
-  base: ExpenseBreakdown,
+/**
+ * Annual inflation for one row, before the category multiplier.
+ *
+ * A row left in the display currency is an ordinary local cost, and inflates
+ * at this location's rate — read off the profile, since the user can edit it.
+ * A row the user has deliberately moved to another currency is a price set in
+ * *that* economy: an Indian school raises its fees at Indian inflation whether
+ * or not the family has moved to Seattle, so the rupee figure follows India
+ * and is only converted afterwards, for display.
+ *
+ * The comparison is against the *display* currency rather than the location's
+ * own, and that distinction matters more than it looks. Every derived row is
+ * denominated in the display currency on both sides of the comparison, so
+ * comparing against the location's currency would classify New York's own
+ * grocery bill as a foreign obligation the moment results were shown in euros
+ * — and the projection would then change depending on which unit you happened
+ * to be reading it in.
+ */
+export function lineItemInflationRate(
+  item: ExpenseLineItem,
   profile: LocationProfile,
   assumptions: Assumptions,
+  displayCurrency: string
+): number {
+  const headline =
+    item.currency === displayCurrency
+      ? profile.inflationRate
+      : inflationForCurrency(item.currency);
+  return headline * assumptions.categoryInflation[item.category];
+}
+
+/**
+ * Resolve every row into the display currency at month `monthIndex`, applying
+ * each row's own inflation and, for foreign rows, the FX drift assumption.
+ *
+ *   amount_display(m) = amount_local
+ *                     * fxRate(rowCurrency -> display)
+ *                     * (1 + rowInflation/12) ^ m
+ *                     * (1 + fxDrift/12) ^ m      // foreign rows only
+ *
+ * The drift term is what stops a cross-currency obligation being modelled as a
+ * fixed cost. An EMI that never changes in rupees changes every year in
+ * dollars, and at 0% drift the model says so explicitly rather than by
+ * omission.
+ */
+function inflateLineItems(
+  profile: LocationProfile,
+  inputs: SimulationInputs,
   monthIndex: number
 ): ExpenseBreakdown {
-  const out = {} as ExpenseBreakdown;
-  for (const category of EXPENSE_CATEGORIES) {
-    const annual = categoryInflationRate(profile, assumptions, category);
-    out[category] =
-      base[category] * Math.pow(1 + annual / 100 / 12, monthIndex);
+  const { assumptions, displayCurrency, fx } = inputs;
+  const monthlyDrift = assumptions.fxDriftPercent / 100 / 12;
+  const out = emptyBreakdown();
+
+  for (const item of profile.lineItems) {
+    const annual = lineItemInflationRate(
+      item,
+      profile,
+      assumptions,
+      displayCurrency
+    );
+    const converted = convertAmount(
+      item.amount,
+      item.currency,
+      displayCurrency,
+      fx
+    );
+    const inflated = converted * Math.pow(1 + annual / 100 / 12, monthIndex);
+    const drifted =
+      item.currency === displayCurrency
+        ? inflated
+        : inflated * Math.pow(1 + monthlyDrift, monthIndex);
+    out[item.category] += drifted;
   }
   return out;
 }
@@ -136,7 +201,8 @@ export function simulateLocation(
   const monthlyReturn = effectiveReturn / 100 / 12;
   const monthlyGrowth = assumptions.incomeGrowth / 100 / 12;
   const baseTakeHome = monthlyTakeHome(profile.annualIncome, assumptions);
-  const baseExpenses = sumExpenses(profile.expenses);
+  const baseBreakdown = inflateLineItems(profile, inputs, 0);
+  const baseExpenses = sumExpenses(baseBreakdown);
 
   const trajectory: MonthlySnapshot[] = [];
   let savings = inputs.currentSavings;
@@ -145,7 +211,7 @@ export function simulateLocation(
   let breakEvenMonth: number | null = null;
 
   for (let m = 0; m <= inputs.projectionMonths; m++) {
-    const inflated = inflateExpenses(profile.expenses, profile, assumptions, m);
+    const inflated = inflateLineItems(profile, inputs, m);
     const totalExpenses = sumExpenses(inflated);
     const income = baseTakeHome * Math.pow(1 + monthlyGrowth, m);
     const monthlyNet =
@@ -264,9 +330,20 @@ export function runComparison(inputs: SimulationInputs): ComparisonResult {
     (inputs.locationB.colIndex / Math.max(0.05, inputs.locationA.colIndex) - 1) *
     100;
 
+  const expensesA = resolveExpenses(
+    inputs.locationA.lineItems,
+    inputs.displayCurrency,
+    inputs.fx
+  );
+  const expensesB = resolveExpenses(
+    inputs.locationB.lineItems,
+    inputs.displayCurrency,
+    inputs.fx
+  );
+
   const categories: CategoryComparison[] = EXPENSE_CATEGORIES.map((category) => {
-    const a = inputs.locationA.expenses[category];
-    const b = inputs.locationB.expenses[category];
+    const a = expensesA[category];
+    const b = expensesB[category];
     return {
       category,
       label: EXPENSE_LABELS[category],
