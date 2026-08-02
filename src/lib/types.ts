@@ -6,16 +6,20 @@
  * are deciding whether to move there, so that is the unit the answer matters
  * in. Household income is entered in it directly.
  *
- * Three separate multipliers, deliberately never merged (see `lib/fx.ts`):
+ * Five separate quantities, deliberately never merged (see `lib/ppp-data.ts`
+ * for the order in which they apply):
  *
- *   FX         unit conversion only. Applied to the savings you already hold,
- *              and to any budget row the user has denominated in a currency
- *              other than the display one. Never to a price level.
- *   colIndex   city basket cost vs the US average. Re-prices the budget, and
- *              because it is a real-terms index it yields expenses already in
- *              the same unit as the income it was derived from.
- *   ppp        country price level vs the US. Used only for the international
- *              -dollars lens, never for the budget.
+ *   FX           unit conversion only. Applied to the savings you already hold,
+ *                and to any budget row the user has denominated in a currency
+ *                other than the display one. Never to a price level.
+ *   colIndex     city basket cost vs the US average. Re-prices the budget, and
+ *                because it is a real-terms index it yields expenses already in
+ *                the same unit as the income it was derived from.
+ *   inflation    country price change over *time*. Re-prices the basket month
+ *                by month, and deflates the balance for the `realSavings` view.
+ *   ppp          country price level vs the US, a *cross-country* comparison at
+ *                one moment. Used only for the international-dollars lens.
+ *   marketReturn country equity return. Nominal, and grows the balance only.
  */
 
 import type { FxSnapshot } from "./fx";
@@ -230,8 +234,18 @@ export interface MonthlySnapshot {
   monthlyBurn: number;
   monthlyNet: number;
   totalExpenses: number;
-  /** Savings restated as buying power in City A's present-day prices. */
-  pppAdjustedSavings: number;
+  /**
+   * The balance deflated by this city's own cumulative inflation: the same
+   * money stated in the city's month-0 prices. An adjustment across *time*,
+   * within one country — not a PPP adjustment, which is across countries.
+   */
+  realSavings: number;
+  /**
+   * `realSavings` further divided by the country price level: US-equivalent
+   * buying power, and the only one of the three series that may be compared
+   * between two countries directly.
+   */
+  intlSavings: number;
   /** Cumulative price multiplier since month 0 for this city. */
   inflationMultiplier: number;
 }
@@ -267,8 +281,12 @@ export interface SimulationResult {
   runwayLabel: string;
   /** First month where the balance exceeds double the starting savings. */
   breakEvenMonth: number | null;
+  /** Nominal end balance, in the display currency. */
   finalSavings: number;
-  finalPppSavings: number;
+  /** End balance in this city's month-0 prices. Inflation-adjusted only. */
+  finalRealSavings: number;
+  /** End balance in international dollars. The cross-border comparable. */
+  finalIntlSavings: number;
   trajectory: MonthlySnapshot[];
 }
 
@@ -285,8 +303,18 @@ export interface ComparisonResult {
   locationA: SimulationResult;
   locationB: SimulationResult;
   currency: string;
-  /** Real buying-power gap at the end of the projection (B minus A). */
+  /**
+   * End-of-projection gap in international dollars (B minus A): both sides
+   * put on a common price level first, so it is a genuine buying-power gap.
+   */
   pppAdvantageB: number;
+  /**
+   * End-of-projection gap between the two inflation-deflated balances
+   * (B minus A). Each side is in its *own* city's prices, so this answers
+   * "which pile is larger" rather than "which pile buys more" — the two part
+   * company whenever the countries' price levels differ.
+   */
+  realAdvantageB: number;
   /** Runway gap in months (B minus A). Null when neither depletes. */
   runwayDifferenceMonths: number | null;
   /** (colB / colA - 1) * 100 */

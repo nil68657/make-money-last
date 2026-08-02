@@ -6,9 +6,12 @@ export interface TrajectoryPoint {
   /** Nominal balance. */
   a: number;
   b: number;
-  /** Balance restated in month-0 prices. */
+  /** Balance restated in each city's own month-0 prices. */
   aReal: number;
   bReal: number;
+  /** Balance in international dollars — the only cross-country comparable. */
+  aIntl: number;
+  bIntl: number;
 }
 
 /**
@@ -48,8 +51,10 @@ function toPoint(a: MonthlySnapshot, b: MonthlySnapshot): TrajectoryPoint {
     date: a.date,
     a: a.savings,
     b: b.savings,
-    aReal: a.pppAdjustedSavings,
-    bReal: b.pppAdjustedSavings,
+    aReal: a.realSavings,
+    bReal: b.realSavings,
+    aIntl: a.intlSavings,
+    bIntl: b.intlSavings,
   };
 }
 

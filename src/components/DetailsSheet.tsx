@@ -90,7 +90,7 @@ export function DetailsSheet({
               {[
                 "Date",
                 "Balance",
-                "In today's money",
+                "In today's prices",
                 "Take-home",
                 "Spend",
                 "Net",
@@ -125,7 +125,7 @@ export function DetailsSheet({
                   {formatCurrency(row.savings, currency)}
                 </td>
                 <td className="tabular whitespace-nowrap px-4 py-2.5 text-right text-fg-muted">
-                  {formatCurrency(row.pppAdjustedSavings, currency)}
+                  {formatCurrency(row.realSavings, currency)}
                 </td>
                 <td className="tabular whitespace-nowrap px-4 py-2.5 text-right text-fg-muted">
                   {formatCurrency(row.monthlyIncome, currency)}

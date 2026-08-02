@@ -16,6 +16,7 @@ import { buildTrajectoryData, yearTicks } from "@/lib/chart-data";
 import { formatCurrency, formatPercent } from "@/lib/format";
 import type { ComparisonResult } from "@/lib/types";
 import { SegmentedControl } from "@/components/ui/primitives";
+import { InfoTip } from "@/components/ui/InfoTip";
 import {
   ChartSkeleton,
   LegendChip,
@@ -24,13 +25,25 @@ import {
   useChart,
 } from "./chart-parts";
 
-/** Which of the two balance series to draw. */
-type PowerMode = "both" | "real" | "nominal";
+/** Which lens on the balance to draw. */
+type PowerMode = "both" | "real" | "nominal" | "intl";
 
 /**
- * Nominal balance (dashed) against the same balance restated in today's prices
- * (filled). The gap between the two lines is inflation quietly eating the pile,
- * which is the single most under-appreciated part of a long runway.
+ * The same balance under three different questions, which the app is careful
+ * never to conflate:
+ *
+ *   nominal  what the statement says
+ *   real     what it buys where you live, once this city's own inflation over
+ *            the projection is divided out
+ *   intl     what it buys anywhere, once the country's price level is divided
+ *            out too — the only one of the three that can be compared between
+ *            two countries, because market exchange rates do not equalise what
+ *            money actually buys
+ *
+ * The gap between nominal and real is inflation quietly eating the pile, the
+ * most under-appreciated part of a long runway. The gap between real and
+ * international is the reason a smaller balance in a cheaper country can be
+ * the better outcome.
  */
 export function BuyingPowerChart({
   result,
@@ -46,11 +59,13 @@ export function BuyingPowerChart({
   const data = useMemo(() => buildTrajectoryData(result), [result]);
   const ticks = useMemo(() => yearTicks(data), [data]);
 
-  const showReal = mode !== "nominal";
-  const showNominal = mode !== "real";
+  const showIntl = mode === "intl";
+  const showReal = mode === "both" || mode === "real";
+  const showNominal = mode === "both" || mode === "nominal";
 
   const nameA = result.locationA.locationName;
   const nameB = result.locationB.locationName;
+  const seriesNoun = showIntl ? "international $" : showReal ? "real" : "nominal";
 
   const finalPoint = data[data.length - 1];
   const erosionB =
@@ -70,14 +85,8 @@ export function BuyingPowerChart({
     <div>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-x-5 gap-y-3">
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
-          <LegendChip
-            color={theme.cityA}
-            label={showReal ? `${nameA} — real` : `${nameA} — nominal`}
-          />
-          <LegendChip
-            color={theme.cityB}
-            label={showReal ? `${nameB} — real` : `${nameB} — nominal`}
-          />
+          <LegendChip color={theme.cityA} label={`${nameA} — ${seriesNoun}`} />
+          <LegendChip color={theme.cityB} label={`${nameB} — ${seriesNoun}`} />
           {mode === "both" && (
             <LegendChip
               color={theme.muted}
@@ -95,6 +104,11 @@ export function BuyingPowerChart({
             { value: "both", label: "Both", name: "Both series" },
             { value: "real", label: "Real", name: "Real value only" },
             { value: "nominal", label: "Nominal", name: "Nominal value only" },
+            {
+              value: "intl",
+              label: "Intl $",
+              name: "International dollars only",
+            },
           ]}
         />
       </div>
@@ -158,9 +172,21 @@ export function BuyingPowerChart({
                   b: number;
                   aReal: number;
                   bReal: number;
+                  aIntl: number;
+                  bIntl: number;
                 };
                 const lost = point.b > 0 ? (1 - point.bReal / point.b) * 100 : 0;
                 const rows = [
+                  showIntl && {
+                    label: `${nameB} — international $`,
+                    value: formatCurrency(point.bIntl, currency),
+                    color: theme.cityB,
+                  },
+                  showIntl && {
+                    label: `${nameA} — international $`,
+                    value: formatCurrency(point.aIntl, currency),
+                    color: theme.cityA,
+                  },
                   showReal && {
                     label: `${nameB} — real`,
                     value: formatCurrency(point.bReal, currency),
@@ -196,16 +222,45 @@ export function BuyingPowerChart({
                   <TooltipCard
                     title={point.date}
                     subtitle={
-                      mode === "nominal"
-                        ? "Nominal balance, before inflation"
-                        : "Real value in today's prices"
+                      showIntl
+                        ? "Buying power on a common price level"
+                        : mode === "nominal"
+                          ? "Nominal balance, before inflation"
+                          : "Real value in today's local prices"
                     }
                     rows={rows}
-                    footer={`Inflation has eaten ${formatPercent(Math.max(0, lost), 0)} of buying power in ${nameB}`}
+                    footer={
+                      showIntl
+                        ? "Price levels divided out, so the two are directly comparable"
+                        : `Inflation has eaten ${formatPercent(Math.max(0, lost), 0)} of buying power in ${nameB}`
+                    }
                   />
                 );
               }}
             />
+
+            {showIntl && (
+              <Area
+                type="monotone"
+                dataKey="aIntl"
+                stroke={theme.cityA}
+                strokeWidth={2.25}
+                fill="url(#realA)"
+                dot={false}
+                animationDuration={850}
+              />
+            )}
+            {showIntl && (
+              <Area
+                type="monotone"
+                dataKey="bIntl"
+                stroke={theme.cityB}
+                strokeWidth={2.25}
+                fill="url(#realB)"
+                dot={false}
+                animationDuration={850}
+              />
+            )}
 
             {showReal && (
               <Area
@@ -290,6 +345,50 @@ export function BuyingPowerChart({
         </span>{" "}
         of the buying power of every remaining dollar in {nameB}.
       </p>
+
+      <div className="mt-4 border-t border-line pt-4">
+        <p className="text-[11px] font-bold uppercase tracking-wider text-fg-subtle">
+          {nameB} at the end, three ways
+        </p>
+        <div className="mt-3 grid gap-3 sm:grid-cols-3">
+          <Lens
+            label="Nominal"
+            value={formatCurrency(finalPoint?.b ?? 0, currency, true)}
+            tip="What the statement would say. No adjustment of any kind — the figure that flatters longest."
+          />
+          <Lens
+            label="Real, local prices"
+            value={formatCurrency(finalPoint?.bReal ?? 0, currency, true)}
+            tip={`The same balance divided by ${nameB}'s own cumulative inflation, so it is stated in today's prices. This is an adjustment over time inside one country; it says nothing about how far the money goes anywhere else.`}
+          />
+          <Lens
+            label="International dollars"
+            value={formatCurrency(finalPoint?.bIntl ?? 0, currency, true)}
+            tip={`Divided again by the country price level — ${nameB} sits at ${result.locationB.pppIndex.toFixed(2)}× US prices. Exchange rates convert units but do not equalise what money buys, so this is the only figure that can be set against the other city's directly.`}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** One labelled lens on the end balance, with the distinction spelled out. */
+function Lens({
+  label,
+  value,
+  tip,
+}: {
+  label: string;
+  value: string;
+  tip: string;
+}) {
+  return (
+    <div>
+      <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-fg-subtle">
+        {label}
+        <InfoTip content={tip} align="start" />
+      </p>
+      <p className="tabular mt-1 text-lg font-bold text-fg">{value}</p>
     </div>
   );
 }

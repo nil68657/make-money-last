@@ -12,7 +12,7 @@ import {
   SimulationInputs,
   SimulationResult,
 } from "./types";
-import { getEffectivePpp } from "./ppp-data";
+import { getEffectivePpp, toInternationalDollars } from "./ppp-data";
 import { blendedReturn, realReturn } from "./market-data";
 import { inflationForCurrency } from "./cities";
 import { convertAmount } from "./fx";
@@ -54,6 +54,12 @@ import {
  *   - `inflationMultiplier` is the basket-weighted cumulative price level, taken
  *     as totalExpenses(m) / totalExpenses(0). Using the real basket rather than
  *     the headline rate means the deflator respects the per-category multipliers.
+ *   - The balance is reported through three lenses — `savings` (nominal),
+ *     `realSavings` (÷ inflationMultiplier, this city's month-0 prices) and
+ *     `intlSavings` (÷ ppp as well, US-equivalent buying power). Only the last
+ *     may be compared across countries; the first two are same-country views.
+ *     Deflating over time and deflating across borders are different questions,
+ *     and `ppp-data.ts` sets out why composing them double-counts nothing.
  *   - The balance floors at zero. Once savings are exhausted you cannot keep
  *     drawing from an empty account, so the shortfall becomes a cashflow problem
  *     rather than an ever-deepening negative asset. Runway is still measured
@@ -238,6 +244,13 @@ export function simulateLocation(
         ? totalExpenses / baseExpenses
         : Math.pow(1 + profile.inflationRate / 100 / 12, m);
 
+    // Three lenses on one balance, each a strictly separate adjustment:
+    // nominal is untouched; real divides out this city's inflation over time;
+    // international further divides out its price level against the US, which
+    // is the only step that makes two countries comparable. See `ppp-data.ts`.
+    const realSavings =
+      inflationMultiplier > 0 ? savings / inflationMultiplier : savings;
+
     trajectory.push({
       monthIndex: m,
       date: formatMonthLabel(addMonths(startDate, m)),
@@ -246,9 +259,8 @@ export function simulateLocation(
       monthlyBurn: Math.max(0, totalExpenses - income),
       monthlyNet,
       totalExpenses,
-      // Balance restated in the city's present-day prices.
-      pppAdjustedSavings:
-        inflationMultiplier > 0 ? savings / inflationMultiplier : savings,
+      realSavings,
+      intlSavings: toInternationalDollars(realSavings, ppp),
       inflationMultiplier,
     });
 
@@ -291,7 +303,8 @@ export function simulateLocation(
     ),
     breakEvenMonth,
     finalSavings: last.savings,
-    finalPppSavings: last.pppAdjustedSavings,
+    finalRealSavings: last.realSavings,
+    finalIntlSavings: last.intlSavings,
     trajectory,
   };
 }
@@ -318,7 +331,12 @@ export function runComparison(inputs: SimulationInputs): ComparisonResult {
   const locationA = simulateLocation(inputs.locationA, inputs);
   const locationB = simulateLocation(inputs.locationB, inputs);
 
-  const pppAdvantageB = locationB.finalPppSavings - locationA.finalPppSavings;
+  // Both sides are already in one currency, so this subtraction is only asking
+  // which pile is bigger. Whether it *buys* more needs the price levels off
+  // first: ₹1 in Mumbai and $1 in Zurich are the same unit here and nothing
+  // like the same groceries. Hence two figures, not one.
+  const realAdvantageB = locationB.finalRealSavings - locationA.finalRealSavings;
+  const pppAdvantageB = locationB.finalIntlSavings - locationA.finalIntlSavings;
 
   const runwayDifferenceMonths = diffRunway(
     locationA.runwayMonths,
@@ -358,6 +376,7 @@ export function runComparison(inputs: SimulationInputs): ComparisonResult {
     locationB,
     currency: inputs.displayCurrency,
     pppAdvantageB,
+    realAdvantageB,
     runwayDifferenceMonths,
     costOfLivingDeltaPercent,
     equivalentIncomeInB: equivalentIncome(

@@ -113,7 +113,8 @@ for (const side of [r.locationA, r.locationB]) {
       ` rate ${side.savingsRate.toFixed(1).padStart(6)}%` +
       ` runway ${String(side.runwayMonths).padStart(5)}mo` +
       ` final ${Math.round(side.finalSavings).toString().padStart(10)}` +
-      ` real ${Math.round(side.finalPppSavings).toString().padStart(10)}`
+      ` real ${Math.round(side.finalRealSavings).toString().padStart(10)}` +
+      ` intl ${Math.round(side.finalIntlSavings).toString().padStart(10)}`
   );
 }
 console.log(`  COL delta ${r.costOfLivingDeltaPercent.toFixed(1)}%  equiv income ${r.equivalentIncomeInB}  runway delta ${r.runwayDifferenceMonths}`);
@@ -122,8 +123,8 @@ check("trajectory length = months + 1", r.locationA.trajectory.length === 361);
 check("month 0 balance = starting savings", r.locationA.trajectory[0].savings === 250_000);
 check("Lisbon has better cashflow", r.locationB.monthlyNet > r.locationA.monthlyNet);
 check("Lisbon cheaper", r.costOfLivingDeltaPercent < 0);
-check("real <= nominal at the end (inflation erodes)", r.locationB.finalPppSavings < r.locationB.finalSavings);
-check("month-0 real == nominal", Math.abs(r.locationB.trajectory[0].pppAdjustedSavings - 250_000) < 1);
+check("real <= nominal at the end (inflation erodes)", r.locationB.finalRealSavings < r.locationB.finalSavings);
+check("month-0 real == nominal", Math.abs(r.locationB.trajectory[0].realSavings - 250_000) < 1);
 check(
   "categories cover every bucket",
   r.categories.length === EXPENSE_CATEGORIES.length,
@@ -296,6 +297,97 @@ check(
   "ppp is carried through untouched by FX",
   inYen.locationB.pppIndex === lisbon.ppp,
   `${inYen.locationB.pppIndex} vs ${lisbon.ppp}`
+);
+
+// ------------------------------------------------- inflation vs ppp lenses
+// Two adjustments that look alike and are not. `realSavings` deflates over
+// *time* inside one country; `intlSavings` deflates across *countries* at one
+// moment. Subtracting two real balances from different countries — which this
+// model used to do, under the name pppAdvantage — asks which pile is bigger
+// while appearing to answer which pile buys more.
+function pairInputs(
+  a: typeof ny,
+  b: typeof ny,
+  savings: number,
+  income: number
+): SimulationInputs {
+  return {
+    ...makeInputs(savings, income),
+    displayCurrency: b.currency,
+    locationA: buildLocationProfile(a, income, b.currency),
+    locationB: buildLocationProfile(b, income, b.currency),
+  };
+}
+
+const zurich = searchCities("zurich")[0];
+const mumbai = searchCities("mumbai")[0];
+const zm = runComparison(pairInputs(zurich, mumbai, 20_000_000, 9_000_000));
+const zmShift =
+  Math.abs(zm.realAdvantageB) > 0
+    ? Math.abs(zm.pppAdvantageB - zm.realAdvantageB) / Math.abs(zm.realAdvantageB)
+    : Infinity;
+console.log(
+  `\n  --- Zürich (ppp ${zurich.ppp}) -> Mumbai (ppp ${mumbai.ppp}) ---\n` +
+    `  final real  A ${Math.round(zm.locationA.finalRealSavings)}  B ${Math.round(zm.locationB.finalRealSavings)}  advantage ${Math.round(zm.realAdvantageB)}\n` +
+    `  final intl  A ${Math.round(zm.locationA.finalIntlSavings)}  B ${Math.round(zm.locationB.finalIntlSavings)}  advantage ${Math.round(zm.pppAdvantageB)}`
+);
+check(
+  "high-ppp-gap pair: both sides actually hold a balance",
+  zm.locationA.finalRealSavings > 0 && zm.locationB.finalRealSavings > 0
+);
+check(
+  "ppp adjustment moves the Zürich/Mumbai verdict materially",
+  zmShift > 0.2,
+  `${(zmShift * 100).toFixed(0)}% shift`
+);
+check(
+  "cheaper country gains once price levels are honoured",
+  zm.pppAdvantageB > zm.realAdvantageB
+);
+
+const austin = getCityById("us-austin-tx")!;
+const sameCountry = runComparison(pairInputs(ny, austin, 250_000, 150_000));
+check(
+  "same country (identical ppp): adjustment is a no-op on the gap",
+  Math.abs(sameCountry.pppAdvantageB - sameCountry.realAdvantageB) < 1e-6,
+  `${sameCountry.pppAdvantageB} vs ${sameCountry.realAdvantageB}`
+);
+check(
+  "same country: intl series equals real series on both sides",
+  Math.abs(sameCountry.locationA.finalIntlSavings - sameCountry.locationA.finalRealSavings) < 1e-6 &&
+    Math.abs(sameCountry.locationB.finalIntlSavings - sameCountry.locationB.finalRealSavings) < 1e-6
+);
+
+const zeroInflation = runComparison({
+  ...base,
+  locationA: { ...base.locationA, inflationRate: 0 },
+  locationB: { ...base.locationB, inflationRate: 0 },
+});
+check(
+  "zero inflation: real collapses onto nominal",
+  Math.abs(zeroInflation.locationB.finalRealSavings - zeroInflation.locationB.finalSavings) < 1e-6,
+  `${Math.round(zeroInflation.locationB.finalRealSavings)} vs ${Math.round(zeroInflation.locationB.finalSavings)}`
+);
+check(
+  "zero inflation: ppp still bites, so the two lenses are independent",
+  lisbon.ppp !== 1 &&
+    Math.abs(zeroInflation.locationB.finalIntlSavings - zeroInflation.locationB.finalRealSavings) > 1
+);
+
+// Each conversion exactly once. Undoing the price level must land back on the
+// real series to the last cent; anything else means it was applied twice or
+// folded into another multiplier.
+check(
+  "ppp applied exactly once (dividing back recovers the real series)",
+  Math.abs(r.locationB.finalIntlSavings * r.locationB.pppIndex - r.locationB.finalRealSavings) < 1e-6
+);
+const baseYen = runComparison(restateIn(base, "JPY"));
+const intlRatio = baseYen.locationB.finalIntlSavings / r.locationB.finalIntlSavings;
+const eurJpy = fxRate("EUR", "JPY", FALLBACK_FX);
+check(
+  "fx applied exactly once to the intl series (scales by the rate, nothing more)",
+  r.locationB.finalIntlSavings > 0 && Math.abs(intlRatio - eurJpy) / eurJpy < 1e-9,
+  `ratio ${intlRatio.toFixed(4)} vs rate ${eurJpy}`
 );
 
 // ------------------------------------------------------------ currency data
