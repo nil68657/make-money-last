@@ -12,6 +12,7 @@ import {
   SimulationResult,
 } from "./types";
 import { getEffectivePpp } from "./ppp-data";
+import { blendedReturn, realReturn } from "./market-data";
 import { equivalentIncome, monthlyTakeHome } from "./cost-model";
 
 /**
@@ -29,10 +30,17 @@ import { equivalentIncome, monthlyTakeHome } from "./cost-model";
  *                  flat effective rate
  *   expense_c(m) = base_c * (1 + (inflation * categoryMultiplier_c)/12) ^ m
  *   net(m)       = income(m) - Σ expense_c(m) + extraContribution
- *   balance(m)   = max(0, balance(m-1) * (1 + investmentReturn/12) + net(m))
+ *   r            = marketReturn * investedPercentage / 100   (annual, nominal)
+ *   balance(m)   = max(0, balance(m-1) * (1 + r/12) + net(m))
  *
  * Notes on the deliberate modelling choices:
  *
+ *   - `marketReturn` is the *location's own* market (see `market-data.ts`), so
+ *     the two sides of a comparison compound at different rates. It is nominal;
+ *     inflation is applied separately to the expense side, and the real return
+ *     is derived for display only, never fed back into the balance. Applying
+ *     inflation to both the balance and the basket would deflate twice.
+ *   - Only `investedPercentage` of the balance earns. Cash earns nothing.
  *   - Inflation and returns are compounded monthly at rate/12 (nominal annual
  *     rate convention), not (1+rate)^(1/12). Consistent throughout.
  *   - `inflationMultiplier` is the basket-weighted cumulative price level, taken
@@ -118,7 +126,14 @@ export function simulateLocation(
     profile.manualPppRatio
   );
 
-  const monthlyReturn = assumptions.investmentReturn / 100 / 12;
+  // Each side grows at its *own* market's rate: if you move, your savings move
+  // with you into the destination's market, so "stay" and "go" are not two
+  // paths through the same portfolio. Only the invested share earns.
+  const effectiveReturn = blendedReturn(
+    profile.marketReturn,
+    assumptions.investedPercentage
+  );
+  const monthlyReturn = effectiveReturn / 100 / 12;
   const monthlyGrowth = assumptions.incomeGrowth / 100 / 12;
   const baseTakeHome = monthlyTakeHome(profile.annualIncome, assumptions);
   const baseExpenses = sumExpenses(profile.expenses);
@@ -192,6 +207,10 @@ export function simulateLocation(
     localCurrency: profile.currency,
     pppIndex: ppp,
     colIndex: profile.colIndex,
+    marketReturn: profile.marketReturn,
+    marketIndex: profile.marketIndex,
+    realMarketReturn: realReturn(profile.marketReturn, profile.inflationRate),
+    effectiveReturn,
     monthlyIncome: baseTakeHome,
     monthlyBurn: first.monthlyBurn,
     monthlyExpenses: baseExpenses,

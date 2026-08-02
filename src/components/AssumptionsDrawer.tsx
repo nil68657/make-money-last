@@ -13,6 +13,7 @@ import {
 } from "./ui/Field";
 import { InfoTip } from "./ui/InfoTip";
 import { cn, flagEmoji, formatCurrency, formatPercent } from "@/lib/format";
+import { blendedReturn, realReturn } from "@/lib/market-data";
 import { sumExpenses } from "@/lib/simulation";
 import {
   Assumptions,
@@ -90,14 +91,14 @@ export function AssumptionsDrawer({
               format={(value) => `${Math.round(value / 12)} years`}
             />
             <RangeField
-              label="Investment return"
-              hint="Annual nominal return earned on the remaining balance. Applied monthly, and only while the balance is positive."
-              value={assumptions.investmentReturn}
-              onChange={(value) => onAssumptions({ investmentReturn: value })}
+              label="Share held in the market"
+              hint="How much of the balance is invested rather than sitting in cash. Cash earns nothing here, so this scales each city's market return — set it to 0% to model a pure cash drawdown. The return itself is per-city, further down."
+              value={assumptions.investedPercentage}
+              onChange={(value) => onAssumptions({ investedPercentage: value })}
               min={0}
-              max={12}
-              step={0.25}
-              format={(value) => formatPercent(value, 2)}
+              max={100}
+              step={5}
+              format={(value) => formatPercent(value, 0)}
             />
             <RangeField
               label="Annual raise"
@@ -170,6 +171,7 @@ export function AssumptionsDrawer({
           side="A"
           profile={locationA}
           currency={currency}
+          investedPercentage={assumptions.investedPercentage}
           onLocation={onLocation}
           onExpense={onExpense}
         />
@@ -178,6 +180,7 @@ export function AssumptionsDrawer({
           side="B"
           profile={locationB}
           currency={currency}
+          investedPercentage={assumptions.investedPercentage}
           onLocation={onLocation}
           onExpense={onExpense}
         />
@@ -212,18 +215,23 @@ function CitySection({
   side,
   profile,
   currency,
+  investedPercentage,
   onLocation,
   onExpense,
 }: {
   side: Side;
   profile: LocationProfile;
   currency: string;
+  investedPercentage: number;
   onLocation: (side: Side, partial: Partial<LocationProfile>) => void;
   onExpense: (side: Side, category: ExpenseCategory, value: number) => void;
 }) {
   const total = sumExpenses(profile.expenses);
   const uid = useId();
   const fieldId = (name: string) => `${uid}-${side}-${name}`;
+
+  const real = realReturn(profile.marketReturn, profile.inflationRate);
+  const effective = blendedReturn(profile.marketReturn, investedPercentage);
 
   return (
     <section className="rounded-lg border border-line bg-surface-2/50 p-4">
@@ -301,6 +309,40 @@ function CitySection({
             max={3}
           />
         </div>
+      </div>
+
+      <div className="mt-4">
+        <FieldLabel
+          htmlFor={fieldId("market")}
+          hint={`Long-run nominal annual return on money invested in ${profile.country}. Pre-filled from ${profile.marketIndex} — a century-scale average, not a forecast, and nobody earns the average in any given decade. Your savings are assumed to sit in the market of the city you live in, so each side of the comparison compounds at its own rate.`}
+        >
+          Market return
+          {profile.useManualReturn && (
+            <span className="ml-1.5 text-[10px] font-bold uppercase tracking-wide text-brand">
+              edited
+            </span>
+          )}
+        </FieldLabel>
+        <NumberInput
+          id={fieldId("market")}
+          value={profile.marketReturn}
+          onChange={(value) =>
+            onLocation(side, { marketReturn: value, useManualReturn: true })
+          }
+          suffix="%"
+          step={0.25}
+          min={0}
+          max={60}
+        />
+        {/* Nominal alone is not comparable across economies: the whole point of
+            showing the real figure is that a high-inflation market's headline
+            return is mostly inflation. */}
+        <p className="mt-1.5 text-[11px] leading-relaxed text-fg-subtle">
+          <span className="font-semibold text-fg-muted">{profile.marketIndex}</span> ·{" "}
+          {formatPercent(real, 1)} real after {formatPercent(profile.inflationRate, 1)}{" "}
+          inflation · {formatPercent(effective, 2)} actually applied at{" "}
+          {formatPercent(investedPercentage, 0)} invested
+        </p>
       </div>
 
       <div className="mt-4">

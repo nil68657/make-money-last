@@ -5,6 +5,7 @@ import {
   ExpenseCategory,
   LocationProfile,
 } from "./types";
+import { marketReturnFor } from "./market-data";
 
 /**
  * Cost model: turning "a city + a household income" into a monthly budget.
@@ -118,6 +119,7 @@ export function buildLocationProfile(
   city: CityRecord,
   annualIncome: number
 ): LocationProfile {
+  const market = marketReturnFor(city.countryCode);
   return {
     cityId: city.id,
     name: cityLabel(city),
@@ -133,6 +135,9 @@ export function buildLocationProfile(
     pppIndex: city.ppp,
     useManualPpp: false,
     manualPppRatio: city.ppp,
+    marketReturn: market.nominalReturn,
+    useManualReturn: false,
+    marketIndex: market.index,
   };
 }
 
@@ -149,6 +154,11 @@ export function retargetLocationProfile(
   const cityChanged = profile.cityId !== city.id;
   const derived = deriveExpenses(annualIncome, city.colIndex);
   const resetRates = options.resetInflationAndPpp ?? cityChanged;
+  // A market return the user typed is a view about their own portfolio, not
+  // about the city, so it survives a change of destination. An untouched one
+  // follows the country, since that is the whole point of the default.
+  const market = marketReturnFor(city.countryCode);
+  const adoptMarket = resetRates && !profile.useManualReturn;
 
   return {
     ...profile,
@@ -167,6 +177,8 @@ export function retargetLocationProfile(
     inflationRate: resetRates ? city.inflation : profile.inflationRate,
     pppIndex: resetRates ? city.ppp : profile.pppIndex,
     manualPppRatio: resetRates ? city.ppp : profile.manualPppRatio,
+    marketReturn: adoptMarket ? market.nominalReturn : profile.marketReturn,
+    marketIndex: adoptMarket ? market.index : profile.marketIndex,
   };
 }
 

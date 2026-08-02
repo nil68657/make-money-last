@@ -3,7 +3,8 @@
  * Run with: npx tsx scripts/verify-model.ts
  */
 import { CITIES, DATASET_CURRENCIES, DEFAULT_CITY_A_ID, DEFAULT_CITY_B_ID, cityCurrency, getCityById, searchCities } from "../src/lib/cities";
-import { buildLocationProfile, deriveExpenses, equivalentIncome } from "../src/lib/cost-model";
+import { buildLocationProfile, deriveExpenses, equivalentIncome, retargetLocationProfile } from "../src/lib/cost-model";
+import { blendedReturn, GLOBAL_MARKET, MARKET_RETURNS, marketReturnFor, realReturn } from "../src/lib/market-data";
 import { runComparison, sumExpenses, formatDateInput } from "../src/lib/simulation";
 import { DEFAULT_ASSUMPTIONS, type SimulationInputs } from "../src/lib/types";
 import { fold } from "../src/lib/text";
@@ -293,6 +294,121 @@ check(
     const out = formatCurrency(1234, code);
     return typeof out === "string" && out.length > 0 && !out.includes("NaN");
   })
+);
+
+// -------------------------------------------------------------- market data
+check(
+  "every country in the dataset resolves a market return",
+  [...countries].every((code) => marketReturnFor(code).nominalReturn > 0)
+);
+check(
+  "market returns are plausible (0-60% nominal)",
+  Object.values(MARKET_RETURNS).every((m) => m.nominalReturn > 0 && m.nominalReturn <= 60)
+);
+check(
+  "every market assumption names its index",
+  Object.values(MARKET_RETURNS).every((m) => m.index.trim().length > 0)
+);
+check("US anchors to the S&P 500", marketReturnFor("US").index === "S&P 500");
+check("India anchors to the Nifty", /Nifty/.test(marketReturnFor("IN").index));
+check(
+  "an unknown country falls back to the global blend",
+  marketReturnFor("ZZ").nominalReturn === GLOBAL_MARKET.nominalReturn
+);
+
+// Fisher, not subtraction. This is the check that stops someone "simplifying"
+// real return back to nominal minus inflation.
+check(
+  "real return uses Fisher, not subtraction",
+  Math.abs(realReturn(12, 6) - 5.660377) < 1e-4,
+  `${realReturn(12, 6).toFixed(4)}% (naive subtraction would say 6%)`
+);
+check("zero inflation leaves the nominal return alone", Math.abs(realReturn(8, 0) - 8) < 1e-9);
+check(
+  "inflation above the nominal return goes negative",
+  realReturn(5, 9) < 0,
+  `${realReturn(5, 9).toFixed(2)}%`
+);
+check("cash-only portfolio earns nothing", blendedReturn(10, 0) === 0);
+check("fully invested earns the whole market return", blendedReturn(10, 100) === 10);
+check("half invested earns half", blendedReturn(10, 50) === 5);
+
+// A profile picks up its own country's market, and each side of a comparison
+// compounds at its own rate rather than a shared one.
+check(
+  "a profile adopts its country's market return",
+  buildLocationProfile(ny, 150_000).marketReturn === marketReturnFor("US").nominalReturn
+);
+const bangalore = CITIES.find((c) => c.city === "Bangalore")!;
+const inMarkets = runComparison(
+  makeInputs(250_000, 150_000)
+);
+check(
+  "the two sides carry different market returns",
+  inMarkets.locationA.marketReturn !== inMarkets.locationB.marketReturn,
+  `${inMarkets.locationA.locationName} ${inMarkets.locationA.marketReturn}% vs ${inMarkets.locationB.locationName} ${inMarkets.locationB.marketReturn}%`
+);
+check(
+  "India's nominal return beats the US but not after inflation",
+  marketReturnFor("IN").nominalReturn > marketReturnFor("US").nominalReturn &&
+    realReturn(marketReturnFor("IN").nominalReturn, bangalore.inflation) <
+      realReturn(marketReturnFor("US").nominalReturn, ny.inflation),
+  `IN ${realReturn(marketReturnFor("IN").nominalReturn, bangalore.inflation).toFixed(2)}% real` +
+    ` vs US ${realReturn(marketReturnFor("US").nominalReturn, ny.inflation).toFixed(2)}% real`
+);
+
+// Growth must actually reach the balance, and the invested share must gate it.
+const investedFully = runComparison({
+  ...base,
+  assumptions: { ...DEFAULT_ASSUMPTIONS, investedPercentage: 100 },
+});
+const allCash = runComparison({
+  ...base,
+  assumptions: { ...DEFAULT_ASSUMPTIONS, investedPercentage: 0 },
+});
+check(
+  "being invested compounds the balance higher than holding cash",
+  investedFully.locationB.finalSavings > allCash.locationB.finalSavings * 1.2,
+  `${Math.round(investedFully.locationB.finalSavings)} vs ${Math.round(allCash.locationB.finalSavings)}`
+);
+check(
+  "growth lengthens runway rather than being ignored",
+  (runComparison({
+    ...makeInputs(60_000, 150_000),
+    assumptions: { ...DEFAULT_ASSUMPTIONS, investedPercentage: 100 },
+  }).locationA.runwayMonths ?? 0) >
+    (runComparison({
+      ...makeInputs(60_000, 150_000),
+      assumptions: { ...DEFAULT_ASSUMPTIONS, investedPercentage: 0 },
+    }).locationA.runwayMonths ?? 0)
+);
+check(
+  "the reported effective return matches the blend actually applied",
+  Math.abs(
+    investedFully.locationB.effectiveReturn -
+      blendedReturn(investedFully.locationB.marketReturn, 100)
+  ) < 1e-9
+);
+
+// The market return is nominal and must not be secretly deflated: changing the
+// display currency (an FX operation) must leave it untouched.
+check(
+  "market return survives a change of display currency",
+  inYen.locationB.marketReturn === inEuro.locationB.marketReturn &&
+    inYen.locationB.realMarketReturn === inEuro.locationB.realMarketReturn
+);
+check(
+  "a manual return survives a change of city",
+  retargetLocationProfile(
+    { ...buildLocationProfile(ny, 150_000), marketReturn: 3.5, useManualReturn: true },
+    lisbon,
+    150_000
+  ).marketReturn === 3.5
+);
+check(
+  "an untouched return follows the city",
+  retargetLocationProfile(buildLocationProfile(ny, 150_000), lisbon, 150_000)
+    .marketReturn === marketReturnFor(lisbon.countryCode).nominalReturn
 );
 
 // same city both sides -> identical results

@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { Sheet } from "./ui/Sheet";
 import { SegmentedControl } from "./ui/primitives";
 import { cn, flagEmoji, formatCurrency, formatPercent } from "@/lib/format";
+import { blendedReturn, realReturn } from "@/lib/market-data";
 import type { ComparisonResult, SimulationInputs } from "@/lib/types";
 
 type Side = "A" | "B";
@@ -77,8 +78,8 @@ export function DetailsSheet({
           ]}
         />
         <p className="text-xs text-fg-muted">
-          Inflation {formatPercent(profile.inflationRate)} · Return{" "}
-          {formatPercent(inputs.assumptions.investmentReturn)}
+          Inflation {formatPercent(profile.inflationRate)} · {profile.marketIndex}{" "}
+          {formatPercent(profile.marketReturn)} nominal
         </p>
       </div>
 
@@ -165,8 +166,20 @@ export function DetailsSheet({
           </li>
           <li>
             <span className="font-semibold text-fg">Balance</span> earns{" "}
-            {formatPercent(inputs.assumptions.investmentReturn)} a year while
-            positive, then settles the month&apos;s net cashflow.
+            {formatPercent(profile.marketReturn)} a year — the long-run nominal
+            return of {profile.marketIndex}, this city&apos;s market — on the{" "}
+            {formatPercent(inputs.assumptions.investedPercentage, 0)} of it held
+            in the market, so{" "}
+            {formatPercent(
+              blendedReturn(
+                profile.marketReturn,
+                inputs.assumptions.investedPercentage
+              ),
+              2
+            )}{" "}
+            in practice. That is{" "}
+            {formatPercent(realReturn(profile.marketReturn, profile.inflationRate), 1)}{" "}
+            after inflation.
           </li>
           <li>
             <span className="font-semibold text-fg">In today&apos;s money</span>{" "}

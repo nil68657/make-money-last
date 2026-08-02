@@ -96,12 +96,27 @@ export interface LocationProfile {
   pppIndex: number;
   useManualPpp: boolean;
   manualPppRatio: number;
+  /**
+   * Long-run nominal annual return on money invested in *this* location's
+   * market, percent. Pre-filled from the country (see `market-data.ts`): if
+   * you move, your savings move into the destination's market, so each side
+   * of the comparison grows at its own rate rather than a shared one.
+   */
+  marketReturn: number;
+  /** Freezes `marketReturn` against city changes once the user has set it. */
+  useManualReturn: boolean;
+  /** Index the default was anchored to, so the UI can name the assumption. */
+  marketIndex: string;
 }
 
 /** Model dials exposed through the assumptions drawer. */
 export interface Assumptions {
-  /** Annual nominal return applied monthly to the remaining balance, percent. */
-  investmentReturn: number;
+  /**
+   * Share of the balance held in the market rather than as cash, percent.
+   * Cash earns nothing here, so this scales each location's market return —
+   * someone sitting on cash should not be modelled as holding equities.
+   */
+  investedPercentage: number;
   /** Annual nominal raise applied to income, percent. */
   incomeGrowth: number;
   /** Flat effective tax + payroll rate applied to gross income, percent. */
@@ -168,6 +183,14 @@ export interface SimulationResult {
   localCurrency: string;
   pppIndex: number;
   colIndex: number;
+  /** Nominal annual return assumed for this location's market, percent. */
+  marketReturn: number;
+  /** Index that assumption is anchored to, e.g. "Nifty 50 TRI". */
+  marketIndex: string;
+  /** `marketReturn` after this location's inflation, by Fisher. Percent. */
+  realMarketReturn: number;
+  /** What the balance actually earns once the cash share is held back. */
+  effectiveReturn: number;
   /** Monthly take-home income at month 0. */
   monthlyIncome: number;
   /** Month-0 spend that is not covered by income (0 when cashflow positive). */
@@ -213,7 +236,7 @@ export interface ComparisonResult {
 }
 
 export const DEFAULT_ASSUMPTIONS: Assumptions = {
-  investmentReturn: 4,
+  investedPercentage: 80,
   incomeGrowth: 2.5,
   effectiveTaxRate: 25,
   adjustSalaryToLocalMarket: false,
