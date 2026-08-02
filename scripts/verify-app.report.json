@@ -1,90 +1,90 @@
 {
-  "baseUrl": "http://localhost:4321/make-money-last",
+  "baseUrl": "https://nil68657.github.io/make-money-last",
   "passed": 39,
   "failed": 0,
   "steps": [
     {
       "name": "1. Landing page loads",
       "status": "pass",
-      "ms": 743,
+      "ms": 1149,
       "detail": "HTTP 200"
     },
     {
       "name": "2. Hero headline and compare card render",
       "status": "pass",
-      "ms": 32,
+      "ms": 36,
       "detail": "\"See how far your money goes — and how long it la…\""
     },
     {
       "name": "3. Tailwind styles applied (not unstyled HTML)",
       "status": "pass",
-      "ms": 1,
+      "ms": 2,
       "detail": "__Inter_483fe8"
     },
     {
       "name": "4. Screenshot: landing (desktop)",
       "status": "pass",
-      "ms": 1958,
+      "ms": 1898,
       "detail": "saved"
     },
     {
       "name": "5. Combobox opens with popular cities before typing",
       "status": "pass",
-      "ms": 780,
+      "ms": 781,
       "detail": "8 default options, Escape closed it"
     },
     {
       "name": "6. Current city: type → filter → arrow → Enter",
       "status": "pass",
-      "ms": 244,
+      "ms": 241,
       "detail": "San Francisco, CA"
     },
     {
       "name": "7. New city: type → filter → arrow → Enter",
       "status": "pass",
-      "ms": 193,
+      "ms": 197,
       "detail": "Lisbon"
     },
     {
       "name": "8. Combobox filters to nothing gracefully",
       "status": "pass",
-      "ms": 133,
+      "ms": 126,
       "detail": "empty state shown, selection preserved"
     },
     {
       "name": "9. Outside click closes the popup",
       "status": "pass",
-      "ms": 52,
+      "ms": 67,
       "detail": "closed"
     },
     {
       "name": "10. Savings and income fields accept input",
       "status": "pass",
-      "ms": 215,
+      "ms": 198,
       "detail": "savings 480,000, income 210,000"
     },
     {
       "name": "11. Validation toast fires on an invalid form",
       "status": "pass",
-      "ms": 925,
+      "ms": 855,
       "detail": "\"Add your current savings Runway counts down from a starting …\""
     },
     {
       "name": "12. Screenshot: filled compare card",
       "status": "pass",
-      "ms": 682,
+      "ms": 601,
       "detail": "saved"
     },
     {
       "name": "13. Calculate runs and results view renders",
       "status": "pass",
-      "ms": 1218,
+      "ms": 1219,
       "detail": "results rendered with both cities"
     },
     {
       "name": "14. Runway hero shows a real number",
       "status": "pass",
-      "ms": 2,
+      "ms": 1,
       "detail": "16 years"
     },
     {
@@ -96,13 +96,13 @@
     {
       "name": "16. Trajectory chart renders with real dimensions",
       "status": "pass",
-      "ms": 6,
+      "ms": 5,
       "detail": "1126×340, 4 series"
     },
     {
       "name": "17. Chart tooltip is the custom one",
       "status": "pass",
-      "ms": 1226,
+      "ms": 1218,
       "detail": "\"May 2039 Month 153 · 12 yrs 9 mos in San Francisco, CA €190,\""
     },
     {
@@ -114,103 +114,103 @@
     {
       "name": "19. Chart tabs switch (categories + buying power)",
       "status": "pass",
-      "ms": 2180,
+      "ms": 2182,
       "detail": "both alternate charts drew"
     },
     {
       "name": "20. Nominal vs real buying-power toggle works",
       "status": "pass",
-      "ms": 1624,
+      "ms": 1607,
       "detail": "toggled via \"Real value only\""
     },
     {
       "name": "21. Screenshot: results (desktop)",
       "status": "pass",
-      "ms": 1161,
+      "ms": 1127,
       "detail": "saved"
     },
     {
       "name": "22. Metric card opens the month-by-month detail overlay",
       "status": "pass",
-      "ms": 1431,
+      "ms": 1607,
       "detail": "opened and closed with Escape"
     },
     {
       "name": "23. Breakdown sheet opens from the results CTA",
       "status": "pass",
-      "ms": 1468,
+      "ms": 1409,
       "detail": "32 table rows"
     },
     {
       "name": "24. Explainer popovers open (PPP / runway / real)",
       "status": "pass",
-      "ms": 305,
+      "ms": 309,
       "detail": "9 triggers, first reads \"Total monthly spending across every cate…\""
     },
     {
       "name": "25. Assumptions drawer opens with editable budget fields",
       "status": "pass",
-      "ms": 672,
+      "ms": 693,
       "detail": "all six categories present"
     },
     {
       "name": "26. Editing an expense changes the projection",
       "status": "pass",
-      "ms": 1914,
+      "ms": 1923,
       "detail": "rent 7,200 → 9,000, projection recomputed cleanly"
     },
     {
       "name": "27. Edit overlay preserves and updates city selections",
       "status": "pass",
-      "ms": 838,
+      "ms": 839,
       "detail": "carried \"San Francisco, CA\" through"
     },
     {
       "name": "28. Dark mode toggle works and persists",
       "status": "pass",
-      "ms": 855,
+      "ms": 841,
       "detail": "light → dark, stored \"dark\""
     },
     {
       "name": "29. Dark theme survives a reload without a hydration mismatch",
       "status": "pass",
-      "ms": 1640,
+      "ms": 1648,
       "detail": "persisted, no hydration warnings"
     },
     {
       "name": "30. Keyboard-only path through the compare card",
       "status": "pass",
-      "ms": 932,
+      "ms": 945,
       "detail": "selected \"Austin, TX\" with the keyboard"
     },
     {
       "name": "31. Responsive screenshots at 375 / 768 / 1440",
       "status": "pass",
-      "ms": 3332,
+      "ms": 3307,
       "detail": "mobile 375px, tablet 768px, desktop 1440px"
     },
     {
       "name": "32. Full flow at 375px (mobile)",
       "status": "pass",
-      "ms": 3701,
+      "ms": 3678,
       "detail": "chart 317×340, no overflow"
     },
     {
       "name": "33. Tablet results at 768px",
       "status": "pass",
-      "ms": 1078,
+      "ms": 1063,
       "detail": "saved"
     },
     {
       "name": "34. Accessibility contract on interactive elements",
       "status": "pass",
-      "ms": 415,
+      "ms": 417,
       "detail": "all buttons named, all inputs labelled"
     },
     {
       "name": "35. Income field follows the destination currency",
       "status": "pass",
-      "ms": 2328,
+      "ms": 2322,
       "detail": "€138,000 → ¥25,200,000"
     },
     {
@@ -222,19 +222,19 @@
     {
       "name": "37. Projection renders in the destination currency",
       "status": "pass",
-      "ms": 2038,
+      "ms": 2028,
       "detail": "6 cards and the chart axis in JPY"
     },
     {
       "name": "38. JPY renders with no decimal places",
       "status": "pass",
-      "ms": 820,
+      "ms": 819,
       "detail": "155 yen figures, none with decimals"
     },
     {
       "name": "39. Falls back to bundled rates when the FX API is unreachable",
       "status": "pass",
-      "ms": 4103,
+      "ms": 4292,
       "detail": "\"1 USD = 151 JPY · using the bundled offline snapshot — live ra\""
     }
   ],
