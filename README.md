@@ -87,15 +87,43 @@ unclamped, a 30-year projection of a deficit produces a meaningless multi-millio
 negative figure that also wrecks the chart's y-axis. Once savings are gone the shortfall
 is a cashflow problem, not a negative asset.
 
-### One currency, no FX
+### Currency: one unit, and FX applied exactly once
 
-Both cities are reported in the currency of your *current* city. Destination costs are
-re-priced by cost-of-living index rather than converted at a market exchange rate, so
-the two columns stay directly comparable and no FX assumption is ever needed.
+Everything is reported in the currency of the city you are moving *to*, because that is
+where the decision lands. Income is entered in that currency too — pick Tokyo and the
+income field relabels itself to `¥` — and the savings you already hold are converted
+into it once, on entry, at the market rate. The results header keeps the provenance
+visible (`Savings €277.9K (from $320K)`) so the conversion is never silent.
 
-`ppp` — a country-level price level ratio against the US — is kept separate and used
-only for the international-dollars lens, which answers a different question: what a
-held balance is worth in globally comparable terms.
+FX touches the opening balance and nothing else. Every cost in the projection is
+re-priced by **cost-of-living index**, not by exchange rate, and the two multipliers are
+deliberately never combined:
+
+- **FX** is what your money *exchanges* for — a unit conversion, and only that.
+- **PPP** is what your money *buys* locally, a country price level ratio against the US.
+  It stays separate and feeds only the international-dollars lens, which answers a
+  different question: what a held balance is worth in globally comparable terms.
+
+Collapsing the two is the classic bug in this kind of calculator — it double-counts the
+cost difference, once through the exchange rate and again through the local price level.
+`npm run verify:model` asserts they stay independent: changing the display currency must
+leave the computed runway unchanged.
+
+### Where the rates come from
+
+Live rates come from [open.er-api.com](https://open.er-api.com) (no key, no inputs sent),
+cached in `localStorage` for 12 hours, with in-flight requests deduplicated so a fetch
+never fires per keystroke or per render.
+
+**The network can never gate the first paint.** Server and client both render from a
+bundled 63-currency snapshot, so hydration matches exactly; live rates are fetched in an
+effect afterwards and swapped in only if they arrive. If the request fails, is blocked,
+or times out after 6 seconds, the app keeps the bundled snapshot and carries on. The rate
+line under the form always names which is in use — `rates as of 2 Aug 2026, 00:02 UTC`,
+or an explicit note that the offline snapshot is active.
+
+Zero-decimal currencies are handled properly: `¥1,234,567` and `₩1,235` never render
+minor units, and INR uses lakh grouping (`₹1,23,45,678`).
 
 ## The city dataset
 
