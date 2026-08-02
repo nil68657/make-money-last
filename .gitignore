@@ -9,7 +9,11 @@
 
 # next.js
 /.next/
+/.next-*/
 /out/
+
+# browsers downloaded by `npx playwright install`
+/.playwright-browsers/
 
 # production
 /build
@@ -32,3 +36,6 @@ next-env.d.ts
 
 # output of `npm run verify:model`
 /.verify-out/
+
+# pidfile written by `npm run dev:bg`
+/.dev-server.pid
