@@ -1,10 +1,15 @@
 # Make Money Last
 
+**[Try it live → nil68657.github.io/make-money-last](https://nil68657.github.io/make-money-last/)**
+
 A relocation runway simulator. Pick the city you live in, the city you're thinking of
 moving to, and how much you have — then see how long your savings last in each, month
 by month, and whether the move actually leaves you better off.
 
-Everything runs in the browser. No account, no network calls, no data leaves the page.
+Everything runs in the browser. No account, no sign-in, and no data you enter ever
+leaves the page — there is no backend to send it to. The one outbound request is for
+current exchange rates, which carries none of your inputs and is not required: block it
+and the app falls back to a bundled snapshot and keeps working.
 
 ## Quick start
 
@@ -145,16 +150,56 @@ Lucide React
 | Command | Description |
 |---------|-------------|
 | `npm run dev` | Development server with polling file-watcher |
-| `npm run build` | Production build |
+| `npm run dev:bg` | Same server, detached, so it outlives the shell that started it |
+| `npm run dev:stop` / `dev:status` / `dev:restart` | Manage the detached server |
+| `npm run build` | Static export into `out/` |
 | `npm run start` | Serve the production build |
 | `npm run lint` | ESLint |
+| `npm run health` | Is the server down, or is the app broken? Answers it in one command |
+| `npm run verify` | Drives a real browser through 39 end-to-end checks (needs a running server; `--base` targets any URL) |
 | `npm run verify:model` | Compiles and runs `scripts/verify-model.ts` — 62 assertions over the dataset, the city search, formatting, the cost model and the projection engine |
+
+## Deployment
+
+The live site is a **static export** — `next build` with `output: "export"` emits plain
+HTML, CSS and JS into `out/`, which GitHub Pages serves as files. There is no Node
+process behind it, so nothing may depend on a server at request time. The app uses no
+server-only features, which is what makes this possible; the Next image optimizer is
+the one server route in play and is disabled via `images.unoptimized`.
+
+Pushing to `main` runs [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml),
+which builds the export and publishes it with the official Pages actions.
+
+Because the site is a *project* page it is served from a `/make-money-last/` prefix, so
+the build sets `basePath` and `assetPrefix`. That prefix is gated behind a `GITHUB_PAGES`
+environment variable which only the workflow sets — applying it locally would break
+`next dev`. To reproduce the deployed build:
+
+```bash
+GITHUB_PAGES=true npm run build   # -> out/, asset URLs prefixed with /make-money-last
+```
+
+`public/.nojekyll` ships in the export to stop Pages passing the output through Jekyll,
+which would strip the `_next/` directory and leave the page unstyled.
+
+The end-to-end suite is deliberately **not** part of the deploy workflow — it needs a
+running server, and including it would only make deploys flaky. Point it at the
+deployed site instead:
+
+```bash
+npm run verify -- --base https://nil68657.github.io/make-money-last
+```
 
 ## Project structure
 
 ```
+.github/workflows/
+└── deploy.yml                # Static export -> GitHub Pages on push to main
 scripts/
-└── verify-model.ts           # Headless assertions over data + model
+├── verify-app.mjs            # 39 end-to-end browser checks
+├── verify-model.ts           # Headless assertions over data + model
+├── dev-server.mjs            # Detached dev server (start/stop/status)
+└── health-check.mjs          # Server down vs app broken
 src/
 ├── app/                      # Layout, tokens, page shell
 ├── components/
@@ -183,5 +228,7 @@ src/
   transactions are not modelled.
 - Income growth and investment return are constant nominal rates; no sequence-of-returns
   or market volatility.
+- Exchange rates are fetched once per session and cached for 12 hours, so a rate shown
+  can be up to half a day old — and is the bundled snapshot if the request fails.
 
 Directional model for comparing two options. Not financial advice.
