@@ -95,19 +95,39 @@ income field relabels itself to `¥` — and the savings you already hold are co
 into it once, on entry, at the market rate. The results header keeps the provenance
 visible (`Savings €277.9K (from $320K)`) so the conversion is never silent.
 
-FX touches the opening balance and nothing else. Every cost in the projection is
-re-priced by **cost-of-living index**, not by exchange rate, and the two multipliers are
-deliberately never combined:
+FX touches the opening balance and any budget row you deliberately leave in another
+currency. It never touches a price level. Every cost in the projection is re-priced by
+**cost-of-living index**, not by exchange rate.
 
-- **FX** is what your money *exchanges* for — a unit conversion, and only that.
-- **PPP** is what your money *buys* locally, a country price level ratio against the US.
-  It stays separate and feeds only the international-dollars lens, which answers a
-  different question: what a held balance is worth in globally comparable terms.
+### Four quantities that must not collapse into each other
 
-Collapsing the two is the classic bug in this kind of calculator — it double-counts the
-cost difference, once through the exchange rate and again through the local price level.
-`npm run verify:model` asserts they stay independent: changing the display currency must
-leave the computed runway unchanged.
+Almost every mistake this model can make is one of these being mistaken for another, so
+they are named separately in the code and applied in a fixed order:
+
+| | What it asks | Where it applies |
+|---|---|---|
+| **FX** | What does my money *exchange* for? | Opening balance, and foreign-currency budget rows. A unit conversion, once. |
+| **Inflation** | What does it buy here *later*? | Re-prices the basket month by month. Deflating the balance by it gives the **real** balance, in this city's month-0 prices. |
+| **PPP** | What does it buy *elsewhere*? | Country price level against the US. Dividing by it gives **international dollars**, the only figure comparable across a border. |
+| **Market return** | What does it *earn*? | Grows the invested share at the destination country's own market rate. Nominal, never inflation-adjusted before compounding. |
+
+Inflation and PPP are the pair most easily confused, because both are called "adjusting
+for prices". One is across *time* within a country; the other is across *countries* at a
+moment. Applying both composes cleanly and double-counts nothing.
+
+This model got that wrong until recently, and it is worth recording how: a field called
+`pppAdjustedSavings` was in fact an inflation deflator, and the comparison subtracted two
+of them across a border without the price levels ever entering. On a Zürich-to-Mumbai run
+the answer moves 418% once they do. The three balances are now `savings`, `realSavings`
+and `intlSavings`, and the app shows all three side by side rather than picking one and
+labelling it vaguely.
+
+Collapsing FX and PPP is the other classic bug — it charges the cost difference twice,
+once through the exchange rate and again through the local price level. `npm run
+verify:model` holds the line on all of it: changing the display currency must leave the
+runway unchanged, two cities in one country must see no PPP effect at all, zero inflation
+must make real and nominal coincide, and dividing the price level back out must land
+exactly on the real series.
 
 ### Where the rates come from
 
@@ -124,6 +144,45 @@ or an explicit note that the offline snapshot is active.
 
 Zero-decimal currencies are handled properly: `¥1,234,567` and `₩1,235` never render
 minor units, and INR uses lakh grouping (`₹1,23,45,678`).
+
+### Budget lines keep their own currency
+
+A relocated household's costs are not all in one currency. Move Bangalore → Seattle and
+the home-loan EMI and school fees stay in rupees while rent and groceries switch to
+dollars. So the budget is a list of rows rather than a fixed grid, and each row carries
+its own currency, with the origin currency offered first in the picker. Rows can be
+added, removed and reordered, and named freely.
+
+A foreign row shows its converted equivalent underneath, so the conversion can be
+checked at a glance, and it inflates at **its own economy's rate** — an Indian school
+raises fees at Indian inflation whether or not the family has moved. It is also not
+treated as a fixed cost: an optional FX drift assumption models the risk that a payment
+which never changes in rupees changes every year in dollars. It defaults to zero, with
+the inflation gap that relative PPP would imply shown alongside as a reference point.
+
+Categories are rent, food, medical, school, utilities, savings, discretionary,
+miscellaneous and other. The three newer ones were carved out of what "other" already
+absorbed rather than added on top, so naming them does not silently shorten a runway.
+
+### Invested savings grow at the destination's market rate
+
+A US 401(k) and an Indian SIP are not the same asset, so each side of the comparison
+compounds at its own country's broad equity return: 10% for the S&P 500, ~12% for the
+Nifty 50, 8% for the FTSE All-Share, and so on across 84 countries, with a global blend
+for markets too small to assume an index for. Every default is editable.
+
+The figures come from the **UBS Global Investment Returns Yearbook** (Dimson, Marsh &
+Staunton), whose 1900–2023 real returns avoid survivorship bias by including markets that
+went to zero, combined with each country's inflation assumption; supported by Damodaran's
+S&P 500 series for the US and the NSE Nifty 50 TRI for India. Full sourcing, including
+what is weak about the shorter records, is in the header of `src/lib/market-data.ts`.
+These are century-scale averages, not forecasts.
+
+Only the share you hold in the market earns — cash earns nothing — and the return is
+nominal. Real return is shown beside it via Fisher, `(1 + real) = (1 + nominal) / (1 +
+inflation)`, not by subtracting the two, and it is derived for display only. Feeding it
+back into the balance while also inflating the basket would deflate twice. India's higher
+nominal return coming out *lower* in real terms than the US is the point of showing both.
 
 ## The city dataset
 
@@ -184,8 +243,8 @@ Lucide React
 | `npm run start` | Serve the production build |
 | `npm run lint` | ESLint |
 | `npm run health` | Is the server down, or is the app broken? Answers it in one command |
-| `npm run verify` | Drives a real browser through 39 end-to-end checks (needs a running server; `--base` targets any URL) |
-| `npm run verify:model` | Compiles and runs `scripts/verify-model.ts` — 62 assertions over the dataset, the city search, formatting, the cost model and the projection engine |
+| `npm run verify` | Drives a real browser through 41 end-to-end checks (needs a running server; `--base` targets any URL) |
+| `npm run verify:model` | Compiles and runs `scripts/verify-model.ts` — 134 assertions over the dataset, the city search, formatting, the cost model, currency handling, market returns and the projection engine |
 
 ## Deployment
 
