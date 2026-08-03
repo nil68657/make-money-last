@@ -1,61 +1,61 @@
 {
   "baseUrl": "https://nil68657.github.io/make-money-last/",
-  "ranAt": "2026-08-02T17:23:40.331Z",
+  "ranAt": "2026-08-03T06:13:32.551Z",
   "steps": [
     {
       "pass": "live",
       "name": "live site returns 200",
       "status": "pass",
-      "ms": 771,
+      "ms": 1308,
       "detail": "HTTP 200"
     },
     {
       "pass": "live",
       "name": "page is styled, not raw HTML",
       "status": "pass",
-      "ms": 4,
-      "detail": "bg rgb(246, 247, 251), 497 rules, 1 sheet(s)"
+      "ms": 7,
+      "detail": "bg rgb(246, 247, 251), 511 rules, 1 sheet(s)"
     },
     {
       "pass": "live",
       "name": "assets resolve under the base path",
       "status": "pass",
       "ms": 1,
-      "detail": "8 assets, all base-path prefixed"
+      "detail": "10 assets, all base-path prefixed"
     },
     {
       "pass": "live",
       "name": "React hydrated (client interactivity live)",
       "status": "pass",
-      "ms": 198,
+      "ms": 101,
       "detail": "8 popular cities on focus"
     },
     {
       "pass": "live",
       "name": "FX: live rates fetched from the browser",
       "status": "pass",
-      "ms": 7003,
-      "detail": "HTTP 200 — live rates accepted; note reads \"1 USD = 0.868513 EUR · live rates as of 2 Aug 2026, 00:02 UTC\""
+      "ms": 7011,
+      "detail": "HTTP 200 — live rates accepted; note reads \"1 USD = 0.866698 EUR · live rates as of 3 Aug 2026, 00:02 UTC\""
     },
     {
       "pass": "live",
       "name": "rates indicator matches the actual source",
       "status": "pass",
       "ms": 0,
-      "detail": "1 USD = 0.868513 EUR · live rates as of 2 Aug 2026, 00:02 UTC"
+      "detail": "1 USD = 0.866698 EUR · live rates as of 3 Aug 2026, 00:02 UTC"
     },
     {
       "pass": "live",
       "name": "destination currency drives the income field (Tokyo → ¥)",
       "status": "pass",
-      "ms": 616,
+      "ms": 611,
       "detail": "symbol ¥, label \"Pre-tax household income (JPY)\""
     },
     {
       "pass": "live",
       "name": "destination currency updates again (London → £)",
       "status": "pass",
-      "ms": 614,
+      "ms": 610,
       "detail": "symbol £, label \"Pre-tax household income (GBP)\""
     },
     {
@@ -69,15 +69,15 @@
       "pass": "live",
       "name": "full flow: pick cities, enter income, calculate",
       "status": "pass",
-      "ms": 2600,
+      "ms": 2701,
       "detail": "San Francisco, CA → Tokyo, income 22,000,000"
     },
     {
       "pass": "live",
       "name": "results render with charts at real dimensions",
       "status": "pass",
-      "ms": 537,
-      "detail": "SVG 1126×340, 2 series at 1056×24 1056×210"
+      "ms": 538,
+      "detail": "SVG 1126×340, 2 series at 1056×25 1056×230"
     },
     {
       "pass": "live",
@@ -90,8 +90,8 @@
       "pass": "live",
       "name": "JPY renders with no decimal places",
       "status": "pass",
-      "ms": 2,
-      "detail": "whole yen only, e.g. ¥420,236, ¥954,764, ¥1,526,477"
+      "ms": 1,
+      "detail": "whole yen only, e.g. ¥420,675, ¥954,325, ¥1,530,105"
     },
     {
       "pass": "live",
@@ -111,78 +111,92 @@
       "pass": "live",
       "name": "switching destination re-denominates everything (Seoul → ₩ → Tokyo)",
       "status": "pass",
-      "ms": 4011,
-      "detail": "won axis [\"0\",\"₩1.5B\",\"₩3B\"], whole won e.g. ₩3,606,286, ₩8,813,159, round trip clean"
+      "ms": 3974,
+      "detail": "won axis [\"0\",\"₩2.5B\",\"₩5B\"], whole won e.g. ₩3,626,825, ₩8,854,989, round trip clean"
     },
     {
       "pass": "live",
       "name": "chart tab: Categories",
       "status": "pass",
-      "ms": 1290,
-      "detail": "1126×300, 12 bars at 38×142 38×39 38×20 38×15"
+      "ms": 1304,
+      "detail": "1126×300, 16 bars at 26×137 26×38 26×19 26×14"
     },
     {
       "pass": "live",
       "name": "chart tab: Buying power",
       "status": "pass",
-      "ms": 283,
-      "detail": "1126×340, 4 series at 1056×24 1056×87 1056×24 1056×210"
+      "ms": 284,
+      "detail": "1126×340, 4 series at 1056×10 1056×97 1056×25 1056×230"
     },
     {
       "pass": "live",
       "name": "nominal vs real toggle switches the series",
       "status": "pass",
-      "ms": 734,
+      "ms": 758,
       "detail": "real legend 2, nominal legend 2, geometry changed"
+    },
+    {
+      "pass": "live",
+      "name": "international-dollars lens differs from the real one",
+      "status": "pass",
+      "ms": 735,
+      "detail": "intl legend 2, series differ from real"
+    },
+    {
+      "pass": "live",
+      "name": "all three balance lenses are labelled",
+      "status": "pass",
+      "ms": 6,
+      "detail": "Nominal / Real, local prices / International dollars"
     },
     {
       "pass": "live",
       "name": "metric detail overlay opens and closes",
       "status": "pass",
-      "ms": 1997,
+      "ms": 2128,
       "detail": "opened \"Monthly burn month by month Total spending across every cate…\", Escape closed it"
     },
     {
       "pass": "live",
       "name": "dark mode applies",
       "status": "pass",
-      "ms": 1217,
+      "ms": 1222,
       "detail": "rgb(246, 247, 251) → rgb(8, 11, 20)"
     },
     {
       "pass": "live",
       "name": "screenshot: desktop-1440",
       "status": "pass",
-      "ms": 668,
+      "ms": 656,
       "detail": "1440×1000, no horizontal overflow"
     },
     {
       "pass": "live",
       "name": "screenshot: tablet-768",
       "status": "pass",
-      "ms": 854,
+      "ms": 851,
       "detail": "768×1024, no horizontal overflow"
     },
     {
       "pass": "live",
       "name": "screenshot: mobile-375",
       "status": "pass",
-      "ms": 769,
+      "ms": 795,
       "detail": "375×900, no horizontal overflow"
     },
     {
       "pass": "live",
       "name": "landing page at each width",
       "status": "pass",
-      "ms": 5878,
+      "ms": 5944,
       "detail": "desktop-1440, tablet-768, mobile-375"
     },
     {
       "pass": "fx-down",
       "name": "[fx down] page still loads and hydrates",
       "status": "pass",
-      "ms": 224,
-      "detail": "interactive in 224ms with the endpoint dead"
+      "ms": 216,
+      "detail": "interactive in 216ms with the endpoint dead"
     },
     {
       "pass": "fx-down",
@@ -195,21 +209,21 @@
       "pass": "fx-down",
       "name": "[fx down] UI states that it is on the bundled snapshot",
       "status": "pass",
-      "ms": 1236,
+      "ms": 1252,
       "detail": "1 USD = 151 JPY · using the bundled offline snapshot — live rates unavailable"
     },
     {
       "pass": "fx-down",
       "name": "[fx down] full projection still calculates",
       "status": "pass",
-      "ms": 2179,
+      "ms": 2197,
       "detail": "6 cards, chart 1126×340, all finite"
     },
     {
       "pass": "fx-down",
       "name": "[fx down] the fallback rate is the bundled one",
       "status": "pass",
-      "ms": 1,
+      "ms": 3,
       "detail": "1 USD = 151 JPY · using the bundled offline snapshot — live rates unavailable"
     }
   ],
@@ -223,7 +237,7 @@
     "status": 200,
     "failure": "net::ERR_FAILED",
     "corsBlocked": false,
-    "note": "1 USD = 0.868513 EUR · live rates as of 2 Aug 2026, 00:02 UTC",
+    "note": "1 USD = 0.866698 EUR · live rates as of 3 Aug 2026, 00:02 UTC",
     "usingFallback": false
   }
 }

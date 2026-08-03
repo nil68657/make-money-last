@@ -693,8 +693,21 @@ async function runFxDownPass(browser) {
     assert(response.status() === 200, `expected 200, got ${response.status()}`);
     const input = page.getByRole("combobox", { name: "Current city" });
     await input.waitFor({ state: "visible", timeout: 20000 });
-    await input.click();
-    await page.locator('ul[role="listbox"]').first().waitFor({ state: "visible", timeout: 10000 });
+
+    // The markup is server-rendered, so the field is visible and clickable
+    // before React has attached to it and a first click can land on nothing.
+    // Retrying is the point of the check — becoming interactive is what is
+    // being measured, not responding to the very first click.
+    const listbox = page.locator('ul[role="listbox"]').first();
+    let opened = false;
+    for (let attempt = 0; attempt < 5 && !opened; attempt++) {
+      await input.click();
+      opened = await listbox
+        .waitFor({ state: "visible", timeout: 4000 })
+        .then(() => true)
+        .catch(() => false);
+    }
+    assert(opened, "the city combobox never became interactive");
     await input.press("Escape");
     return `interactive in ${Date.now() - started}ms with the endpoint dead`;
   });
