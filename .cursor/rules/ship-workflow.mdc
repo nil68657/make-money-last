@@ -1,0 +1,47 @@
+---
+description: Required test-and-ship workflow for every change to this project
+alwaysApply: true
+---
+
+# Ship Workflow
+
+Every change follows three stages in order. Do not skip ahead, and do not
+report a change as done before stage 3 passes.
+
+## 1. Verify locally
+
+```bash
+npm run health          # is the dev server up? distinguishes "down" from "broken"
+npm run dev:bg          # start it detached if health says it is down
+npm run build           # types + lint + production build
+npm run verify:model    # projection math
+npm run verify          # full browser suite against localhost:3000
+```
+
+A green `npm run build` is **not** evidence the app works. It has given a false
+all-clear before. Only the browser suite counts.
+
+## 2. Commit and push
+
+Commit in small focused increments as you go, never in one batch at the end —
+agent processes in this project have died mid-task and lost uncommitted work.
+
+Never commit `.playwright-browsers/`, `.next*/`, or any file over ~50 MB.
+A 227 MB Chromium binary once had to be stripped by rewriting history.
+
+## 3. Validate the hosted site
+
+Pushing to `main` auto-deploys to https://nil68657.github.io/make-money-last/
+
+```bash
+export GH_TOKEN=$(gh auth token)   # `gh auth status` falsely reports logged out
+gh run watch                       # wait for the deploy to finish
+npm run verify:live                # browser suite against the live URL
+```
+
+A green Actions run only means the build succeeded. It does not mean the site
+works — a broken `basePath` deploys "successfully" and renders unstyled or
+blank. Confirm the live page serves styled content with `_next/` assets
+resolving, then exercise the real flow: pick two cities, Calculate, see results.
+
+If the live check fails, fix forward and redeploy. Never leave `main` broken.
