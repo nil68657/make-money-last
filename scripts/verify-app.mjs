@@ -520,6 +520,39 @@ async function main() {
     return `toggled via "${toggleName}"`;
   });
 
+  // Real (inflation out) and international (price level out too) were one
+  // number under two names until recently. Drawing identically is the
+  // regression to watch for.
+  await step("20b. Three balance lenses stay distinct", async () => {
+    await chartTab(page, "Buying power").click();
+    await page.waitForTimeout(500);
+    const group = page
+      .getByRole("group")
+      .filter({ has: page.getByRole("button", { name: /^Nominal/ }) })
+      .first();
+
+    await group.getByRole("button", { name: /^Real value/i }).click();
+    await page.waitForTimeout(650);
+    const realHtml = await page.locator(".recharts-surface").first().innerHTML();
+
+    await group.getByRole("button", { name: /International dollars/i }).click();
+    await page.waitForTimeout(650);
+    const intlHtml = await page.locator(".recharts-surface").first().innerHTML();
+
+    assert(
+      realHtml !== intlHtml,
+      "the international-dollars lens drew the same series as the real one"
+    );
+    for (const label of ["Nominal", "Real, local prices", "International dollars"]) {
+      const count = await page.getByText(label, { exact: true }).count();
+      assert(count > 0, `no "${label}" lens label under the buying-power chart`);
+    }
+    await shot(page, "06b-buying-power-intl");
+    await chartTab(page, "Runway").click();
+    await page.waitForTimeout(400);
+    return "nominal / real / international all labelled and distinct";
+  });
+
   await step("21. Screenshot: results (desktop)", async () => {
     await page.evaluate(() => window.scrollTo(0, 0));
     await page.waitForTimeout(500);
@@ -587,19 +620,25 @@ async function main() {
       "Medical & insurance",
       "School & childcare",
       "Utilities & internet",
+      "Savings & investments",
+      "Discretionary",
+      "Miscellaneous",
     ]) {
       const count = await dialog.getByText(label, { exact: false }).count();
       assert(count > 0, `budget category "${label}" missing from the drawer`);
     }
     await shot(page, "10-assumptions-drawer");
-    return "all six categories present";
+    return "every budget category present, new ones included";
   });
 
   await step("26. Editing an expense changes the projection", async () => {
     const dialog = page.locator('[role="dialog"]').first();
 
-    // Grab the first rent field inside the drawer and triple it.
-    const rentField = dialog.getByLabel("Rent / mortgage", { exact: false }).first();
+    // Each budget line is a row carrying its own amount and currency, so the
+    // field has to be found within its row: the category name now also appears
+    // on the row's move and remove buttons.
+    const rentRow = dialog.locator("li").filter({ hasText: "Rent / mortgage" }).first();
+    const rentField = rentRow.locator("input").first();
     const before = await rentField.inputValue();
     await rentField.click();
     await rentField.press("Meta+a");
@@ -619,6 +658,57 @@ async function main() {
     const text = (await page.locator("main").innerText()).replace(/\s+/g, " ");
     assert(!/NaN|Infinity/.test(text), "projection broke after the expense edit");
     return `rent ${before} → ${after}, projection recomputed cleanly`;
+  });
+
+  // The case this feature exists for: you move, but the home-loan EMI and the
+  // school fees keep being billed in the currency you left behind.
+  await step("26b. A budget line can be billed in another currency", async () => {
+    await page.getByRole("button", { name: /^Assumptions$/ }).first().click();
+    const dialog = page.locator('[role="dialog"]').first();
+    await dialog.waitFor({ state: "visible", timeout: 8000 });
+
+    const schoolRow = dialog
+      .locator("li")
+      .filter({ hasText: "School & childcare" })
+      .first();
+    const amount = schoolRow.locator("input").first();
+    await amount.click();
+    await amount.press("Meta+a");
+    await amount.pressSequentially("40000", { delay: 8 });
+    await amount.blur();
+
+    await schoolRow.locator("select").first().selectOption("INR");
+    await page.waitForTimeout(500);
+
+    const rowText = (await schoolRow.innerText()).replace(/\s+/g, " ");
+    assert(
+      /=\s*\S*[\d,.]+/.test(rowText),
+      `no converted equivalent shown beside the foreign amount: "${rowText}"`
+    );
+    assert(
+      /INR economy/.test(rowText),
+      `row does not say it inflates at the rupee economy's rate: "${rowText}"`
+    );
+
+    const warning = dialog
+      .locator("p")
+      .filter({ hasText: /in a foreign currency/i })
+      .first();
+    await warning.waitFor({ state: "visible", timeout: 5000 });
+    const warningText = (await warning.innerText()).replace(/\s+/g, " ");
+    assert(
+      /not fixed costs/i.test(warningText),
+      `FX risk on foreign rows is not acknowledged: "${warningText}"`
+    );
+
+    await shot(page, "10b-assumptions-foreign-row");
+    await page.getByRole("button", { name: /^Done$/ }).first().click();
+    await dialog.waitFor({ state: "hidden", timeout: 8000 });
+    await page.waitForTimeout(500);
+
+    const text = (await page.locator("main").innerText()).replace(/\s+/g, " ");
+    assert(!/NaN|Infinity/.test(text), "projection broke on a foreign-currency row");
+    return `rupee school fees converted and flagged: "${warningText.slice(0, 48)}…"`;
   });
 
   await step("27. Edit overlay preserves and updates city selections", async () => {

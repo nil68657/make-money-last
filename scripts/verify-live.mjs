@@ -570,6 +570,42 @@ async function runLivePass(browser) {
     return `real legend ${realLegend}, nominal legend ${nominalLegend}, geometry changed`;
   });
 
+  // The inflation-deflated series and the PPP-adjusted one used to be the same
+  // number under two names. If they ever draw identically again, the price
+  // level has fallen out of the comparison.
+  await step("international-dollars lens differs from the real one", async () => {
+    const group = page
+      .getByRole("group")
+      .filter({ has: page.getByRole("button", { name: /^Nominal/ }) })
+      .first();
+
+    await group.getByRole("button", { name: /^Real value/i }).click();
+    await settleChart(page);
+    const realHtml = await page.locator(".recharts-surface").first().innerHTML();
+
+    await group.getByRole("button", { name: /International dollars/i }).click();
+    await settleChart(page);
+    const intlHtml = await page.locator(".recharts-surface").first().innerHTML();
+    const intlLegend = await page.locator("text=/— international/i").count();
+
+    assert(realHtml !== intlHtml, "the international lens drew the same series as real");
+    assert(intlLegend > 0, "legend did not name the international series");
+    await shot(page, "live-05-buying-power-intl");
+    return `intl legend ${intlLegend}, series differ from real`;
+  });
+
+  await step("all three balance lenses are labelled", async () => {
+    const found = [];
+    for (const label of ["Nominal", "Real, local prices", "International dollars"]) {
+      const count = await page.getByText(label, { exact: true }).count();
+      assert(count > 0, `no "${label}" label under the buying-power chart`);
+      found.push(label);
+    }
+    const stale = await page.getByText(/PPP-adjusted/i).count();
+    assert(stale === 0, "the misleading PPP-adjusted label is still on the page");
+    return found.join(" / ");
+  });
+
   await step("metric detail overlay opens and closes", async () => {
     await chartTab(page, "Runway").click();
     await page.waitForTimeout(400);
